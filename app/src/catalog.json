@@ -1,0 +1,26 @@
+{
+  "blocks": [
+    { "id": "b1", "name": "Bloque 1", "from": 101, "to": 200 },
+    { "id": "b2", "name": "Bloque 2", "from": 201, "to": 300 },
+    { "id": "b3", "name": "Bloque 3", "from": 301, "to": 400 },
+    { "id": "b4", "name": "Bloque 4", "from": 401, "to": 500 },
+    { "id": "b5", "name": "Bloque 5", "from": 501, "to": 600 },
+    { "id": "b6", "name": "Bloque 6", "from": 601, "to": 700 },
+    { "id": "b7", "name": "Bloque 7", "from": 701, "to": 800 }
+  ],
+  "products": [
+    { "id": "agua", "name": "Agua", "price": 5000, "std_qty": 2, "sort": 1 },
+    { "id": "cocacola", "name": "Coca-Cola", "price": 6000, "std_qty": 2, "sort": 2 },
+    { "id": "gatorade", "name": "Gatorade", "price": 7000, "std_qty": 2, "sort": 3 },
+    { "id": "hit", "name": "Jugo Hit", "price": 5000, "std_qty": 1, "sort": 4 },
+    { "id": "detodito_g", "name": "Detodito grande", "price": 9000, "std_qty": 1, "sort": 5 },
+    { "id": "detodito_p", "name": "Detodito pequeño", "price": 5000, "std_qty": 1, "sort": 6 },
+    { "id": "mani_g", "name": "Maní grande", "price": 7000, "std_qty": 1, "sort": 7 },
+    { "id": "mani_p", "name": "Maní pequeño", "price": 4000, "std_qty": 1, "sort": 8 },
+    { "id": "salchichas", "name": "Lata de salchichas", "price": 9000, "std_qty": 1, "sort": 9 },
+    { "id": "crema", "name": "Crema dental", "price": 8000, "std_qty": 1, "sort": 10 },
+    { "id": "cepillo", "name": "Cepillo de dientes", "price": 6000, "std_qty": 1, "sort": 11 },
+    { "id": "shampoo", "name": "Shampoo", "price": 5000, "std_qty": 2, "sort": 12 },
+    { "id": "preservativo", "name": "Preservativo", "price": 8000, "std_qty": 1, "sort": 13 }
+  ]
+}

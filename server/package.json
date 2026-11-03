@@ -1,0 +1,19 @@
+{
+  "name": "market-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Servidor de recepción del hotel: base de datos central (SQLite) y sincronización de las revisiones de minibar.",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "demo": "node src/demo.js",
+    "reset": "node -e \"require('fs').rmSync('data',{recursive:true,force:true})\""
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
