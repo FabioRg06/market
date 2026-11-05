@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Platform, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -16,15 +16,12 @@ type Role = 'revision' | 'recepcion';
 type Route = { name: 'home' } | { name: 'inspect'; inspectionId: string } | { name: 'settings' };
 
 const ROLE_KEY = 'market.role';
-// En el computador (web) no hay base local, así que solo existe la vista de recepción.
-const onlyReception = Platform.OS === 'web';
 
 export default function App() {
-  const [role, setRole] = useState<Role | null | undefined>(onlyReception ? 'recepcion' : undefined);
+  const [role, setRole] = useState<Role | null | undefined>(undefined);
   const [route, setRoute] = useState<Route>({ name: 'home' });
 
   useEffect(() => {
-    if (onlyReception) return;
     AsyncStorage.getItem(ROLE_KEY)
       .then((r) => {
         setRole((r as Role) ?? null);
@@ -33,8 +30,12 @@ export default function App() {
         if (open) setRoute({ name: 'inspect', inspectionId: open.id });
       })
       .catch(() => setRole(null));
-    startAutoSync();
   }, []);
+
+  // Solo quien revisa guarda datos locales y los sincroniza.
+  useEffect(() => {
+    if (role === 'revision') startAutoSync();
+  }, [role]);
 
   function chooseRole(r: Role | null) {
     setRole(r);
@@ -49,7 +50,7 @@ export default function App() {
     content = (
       <SettingsScreen
         onBack={() => setRoute({ name: 'home' })}
-        onChangeRole={onlyReception ? undefined : () => chooseRole(null)}
+        onChangeRole={() => chooseRole(null)}
       />
     );
   else if (role === 'recepcion') content = <ReceptionHome onSettings={() => setRoute({ name: 'settings' })} />;
@@ -66,7 +67,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="dark" />
+      <StatusBar style="light" />
       {content}
     </SafeAreaProvider>
   );

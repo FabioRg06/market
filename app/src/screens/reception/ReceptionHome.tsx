@@ -1,52 +1,45 @@
 // Vista principal de recepción (computador o tablet).
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { api } from '../../api';
-import type { InspectionWithItems, RoomRow } from '../../types';
-import { dayLabel, dayRange, duration, money, time } from '../../format';
+import type { RoomRow } from '../../types';
+import { money } from '../../format';
 import RoomGrid from '../../RoomGrid';
-import { Btn, C, Card, Empty, Header, Screen, s, tabular } from '../../ui';
 import { GearGlyph } from '../../icons';
+import { Btn, C, Confirm, Drawer, Header, Screen, s, tabular } from '../../ui';
+import { canPickFiles, fileToBase64, pickFile } from '../../webfile';
 import RoomDetail from './RoomDetail';
-import ConfigPanel from './ConfigPanel';
+import ReportPanel from './ReportPanel';
+import InventoryPanel from './InventoryPanel';
+import BlocksPanel from './BlocksPanel';
 
-type Tab = 'habitaciones' | 'dia' | 'config';
-const DAY = 24 * 60 * 60 * 1000;
+type Tab = 'habitaciones' | 'reporte' | 'inventario' | 'bloques';
 
-interface DaySummary {
-  inspections: InspectionWithItems[];
-  restocked: { id: string; room_id: string; restocked_at: number; restocked_by: string; room_number: string; block_name: string }[];
-  totalRooms: number;
+interface ImportResult {
+  ok: boolean;
+  marked?: number;
+  notFound?: string[];
+  error?: string;
 }
 
 export default function ReceptionHome({ onSettings }: { onSettings: () => void }) {
-  const { width } = useWindowDimensions();
-  const wide = width >= 1000;
   const [tab, setTab] = useState<Tab>('habitaciones');
-  const [day, setDay] = useState(Date.now());
   const [rooms, setRooms] = useState<RoomRow[]>([]);
-  const [summary, setSummary] = useState<DaySummary | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
-
-  const { from, to } = dayRange(day);
-  const isToday = dayLabel(day) === 'Hoy';
+  const [importing, setImporting] = useState(false);
+  const [imported, setImported] = useState<ImportResult | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [r, d] = await Promise.all([
-        api.get<RoomRow[]>(`/api/rooms?from=${from}&to=${to}`),
-        api.get<DaySummary>(`/api/day?from=${from}&to=${to}`),
-      ]);
-      setRooms(r);
-      setSummary(d);
+      setRooms(await api.get<RoomRow[]>('/api/rooms'));
       setError(null);
       setTick((t) => t + 1);
     } catch (e: any) {
       setError(e.message ?? 'Sin conexión con el servidor');
     }
-  }, [from, to]);
+  }, []);
 
   useEffect(() => {
     load();
@@ -55,12 +48,25 @@ export default function ReceptionHome({ onSettings }: { onSettings: () => void }
   }, [load]);
 
   const select = useCallback((r: RoomRow) => setSelected(r.id), []);
-  const dayTotal = summary?.inspections.reduce((sum, i) => sum + i.total, 0) ?? 0;
 
-  const detail = selected && (
-    <RoomDetail roomId={selected} refreshKey={tick} onClose={() => setSelected(null)} onChanged={load} />
-  );
-  if (selected && !wide) return <Screen>{detail}</Screen>;
+  async function importExcel() {
+    const file = await pickFile('.xlsx,.xls,.csv');
+    if (!file) return;
+    setImporting(true);
+    try {
+      const res = await api.post<ImportResult>('/api/import', { file: await fileToBase64(file), name: file.name });
+      setImported(res);
+      await load();
+    } catch (e: any) {
+      setImported({ ok: false, error: e.message });
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  const count = (st: RoomRow['status']) => rooms.filter((r) => r.status === st).length;
+  const novedades = rooms.filter((r) => r.has_novedad).length;
+  const pendingTotal = rooms.reduce((t, r) => t + (r.status === 'revisada' ? r.total : 0), 0);
 
   return (
     <Screen>
@@ -68,37 +74,44 @@ export default function ReceptionHome({ onSettings }: { onSettings: () => void }
         eyebrow="Recepción"
         title="Minibar del hotel"
         right={
-          <Pressable onPress={onSettings} hitSlop={12} accessibilityRole="button" accessibilityLabel="Ajustes">
-            <GearGlyph size={22} color={C.body} />
-          </Pressable>
+          <View style={[s.row, { gap: 14 }]}>
+            {canPickFiles && (
+              <Btn
+                title={importing ? 'Cargando…' : 'Cargar Excel de salidas'}
+                variant="secondary"
+                disabled={importing}
+                onPress={importExcel}
+                style={{ minHeight: 38 }}
+              />
+            )}
+            <Pressable onPress={onSettings} hitSlop={12} accessibilityRole="button" accessibilityLabel="Ajustes">
+              <GearGlyph size={22} color={C.onBrand} />
+            </Pressable>
+          </View>
         }
       />
 
-      <View style={[s.row, { paddingHorizontal: 16, paddingTop: 12, flexWrap: 'wrap', gap: 8 }]}>
-        {(
-          [
-            ['habitaciones', 'Habitaciones'],
-            ['dia', 'Registro del día'],
-            ['config', 'Productos'],
-          ] as [Tab, string][]
-        ).map(([t, label]) => (
-          <Btn key={t} title={label} variant={tab === t ? 'primary' : 'secondary'} onPress={() => setTab(t)} style={{ minHeight: 44 }} />
-        ))}
-        {tab !== 'config' && (
-          <View style={[s.row, { marginLeft: 'auto', gap: 6 }]}>
-            <Text style={{ color: C.muted, fontWeight: '600' }}>Consumo del día</Text>
-            <Text style={{ fontWeight: '700', fontSize: 26, color: C.ink, marginRight: 10 }}>{money(dayTotal)}</Text>
-            <Btn title="‹" variant="secondary" onPress={() => setDay(day - DAY)} style={{ minHeight: 44, paddingHorizontal: 14 }} />
-            <Text style={{ fontWeight: '600', fontSize: 20, minWidth: 100, textAlign: 'center', color: C.ink }}>{dayLabel(day)}</Text>
-            <Btn
-              title="›"
-              variant="secondary"
-              disabled={isToday}
-              onPress={() => setDay(Math.min(Date.now(), day + DAY))}
-              style={{ minHeight: 44, paddingHorizontal: 14 }}
-            />
-          </View>
-        )}
+      <View style={{ backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.line }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12 }}>
+          {(
+            [
+              ['habitaciones', 'Habitaciones'],
+              ['reporte', 'Reporte del día'],
+              ['inventario', 'Inventario'],
+              ['bloques', 'Bloques'],
+            ] as [Tab, string][]
+          ).map(([t, label]) => (
+            <Pressable
+              key={t}
+              onPress={() => setTab(t)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: tab === t }}
+              style={{ paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 2, borderBottomColor: tab === t ? C.brand : 'transparent' }}
+            >
+              <Text style={{ fontSize: 14, fontWeight: tab === t ? '700' : '500', color: tab === t ? C.brand : C.muted }}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
       </View>
 
       {error && (
@@ -109,67 +122,53 @@ export default function ReceptionHome({ onSettings }: { onSettings: () => void }
         </View>
       )}
 
-      {tab === 'config' ? (
-        <ConfigPanel onChanged={load} />
-      ) : (
-        <View style={{ flex: 1, flexDirection: 'row' }}>
-          <View style={{ flex: 1 }}>
-            {tab === 'habitaciones' ? (
-              <RoomGrid rooms={rooms} onPress={select} selectedId={selected} emptyText={error ? 'Sin datos del servidor.' : undefined} />
-            ) : (
-              <DayLog summary={summary} onOpen={setSelected} />
-            )}
-          </View>
-          {wide && selected && (
-            <View style={{ width: 460, borderLeftWidth: 1, borderLeftColor: C.line, backgroundColor: C.bg }}>{detail}</View>
-          )}
-        </View>
+      {tab === 'habitaciones' && (
+        <>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 10, padding: 16, paddingBottom: 0 }}>
+            <Stat label="Por revisar" value={String(count('por_revisar'))} color={C.status.por_revisar.solid} />
+            <Stat label="Revisadas · falta surtir" value={String(count('revisada'))} color={C.status.revisada.solid} />
+            <Stat label="Novedades" value={String(novedades)} color={C.danger} />
+            <Stat label="Surtidas" value={String(count('surtida'))} color={C.status.surtida.solid} />
+            <Stat label="Por cobrar / reponer" value={money(pendingTotal)} />
+          </ScrollView>
+          <RoomGrid rooms={rooms} onPress={select} selectedId={selected} emptyText={error ? 'Sin datos del servidor.' : undefined} />
+        </>
       )}
+      {tab === 'reporte' && <ReportPanel onOpenRoom={setSelected} />}
+      {tab === 'inventario' && <InventoryPanel />}
+      {tab === 'bloques' && <BlocksPanel onChanged={load} />}
+
+      <Drawer open={!!selected} onClose={() => setSelected(null)}>
+        {selected && <RoomDetail roomId={selected} refreshKey={tick} onClose={() => setSelected(null)} onChanged={load} />}
+      </Drawer>
+
+      <Confirm
+        visible={!!imported}
+        title={imported?.ok ? 'Excel cargado' : 'No se pudo cargar'}
+        message={
+          imported?.ok
+            ? `${imported.marked} habitaciones quedaron por revisar.${
+                imported.notFound?.length ? `\nNo se encontraron: ${imported.notFound.slice(0, 15).join(', ')}${imported.notFound.length > 15 ? '…' : ''}` : ''
+              }`
+            : imported?.error
+        }
+        confirmText="Listo"
+        cancelText="Cerrar"
+        onConfirm={() => setImported(null)}
+        onCancel={() => setImported(null)}
+      />
     </Screen>
   );
 }
 
-function DayLog({ summary, onOpen }: { summary: DaySummary | null; onOpen: (roomId: string) => void }) {
-  if (!summary) return <Empty text="Cargando…" />;
+function Stat({ label, value, color = C.ink }: { label: string; value: string; color?: string }) {
   return (
-    <ScrollView contentContainerStyle={{ padding: 16, gap: 10, maxWidth: 900 }}>
-      <Text style={s.label}>
-        Revisiones · {summary.inspections.length} de {summary.totalRooms}
-      </Text>
-      {summary.inspections.length === 0 && <Empty text="Nadie ha revisado habitaciones este día." />}
-      {summary.inspections.map((i) => {
-        const st = i.finished_at ? (i.units > 0 && !i.restocked_at ? 'revisada' : 'surtida') : 'en_revision';
-        const c = C.status[st];
-        return (
-          <Card key={i.id} onPress={() => onOpen(i.room_id)} style={{ gap: 4, borderLeftWidth: 6, borderLeftColor: c.solid }}>
-            <View style={[s.row, { justifyContent: 'space-between' }]}>
-              <Text style={{ fontWeight: '700', fontSize: 24, color: C.ink }}>
-                {i.room_number} <Text style={{ fontWeight: '600', fontSize: 16, color: C.muted }}>{i.block_name}</Text>
-              </Text>
-              <Text style={{ fontWeight: '700', fontSize: 22, color: C.ink }}>{money(i.total)}</Text>
-            </View>
-            <Text style={s.muted}>
-              {i.inspector} · entró {time(i.started_at)} ·{' '}
-              {i.finished_at ? `salió ${time(i.finished_at)} (${duration(i.started_at, i.finished_at)})` : 'en revisión'}
-            </Text>
-            <Text style={{ color: C.ink }}>{i.units ? i.items.map((it) => `${it.quantity} ${it.name}`).join(', ') : 'Sin consumo'}</Text>
-            {i.units > 0 && (
-              <Text style={{ fontWeight: '700', color: c.ink }}>
-                {i.restocked_at ? `Surtida ${time(i.restocked_at)} · ${i.restocked_by}` : 'Falta surtir'}
-              </Text>
-            )}
-          </Card>
-        );
-      })}
-      <Text style={[s.label, { marginTop: 14 }]}>Surtidas · {summary.restocked.length}</Text>
-      {summary.restocked.length === 0 && <Empty text="No se surtió ninguna habitación este día." />}
-      {summary.restocked.map((r) => (
-        <Card key={r.id} onPress={() => onOpen(r.room_id)}>
-          <Text style={{ color: C.ink }}>
-            <Text style={{ fontWeight: '700', fontSize: 20 }}>{r.room_number}</Text> · {time(r.restocked_at)} por {r.restocked_by}
-          </Text>
-        </Card>
-      ))}
-    </ScrollView>
+    <View style={{ backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.line, paddingHorizontal: 14, paddingVertical: 10, minWidth: 130 }}>
+      <View style={[s.row, { gap: 6 }]}>
+        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
+        <Text style={s.muted}>{label}</Text>
+      </View>
+      <Text style={[{ fontSize: 22, fontWeight: '700', color: C.ink, marginTop: 2 }, tabular]}>{value}</Text>
+    </View>
   );
 }

@@ -41,11 +41,44 @@ export function CloudPending({ size = 16, color = '#64748B' }: IconProps) {
   );
 }
 
+// Rueda dentada de 8 dientes, calculada para que quede simétrica.
+const GEAR_PATH = (() => {
+  const teeth = 8;
+  const outer = 20;
+  const inner = 15.5;
+  const pts: string[] = [];
+  for (let i = 0; i < teeth; i++) {
+    const a = (i / teeth) * Math.PI * 2;
+    const step = (Math.PI * 2) / teeth;
+    const angles = [a - step * 0.3, a - step * 0.17, a + step * 0.17, a + step * 0.3];
+    const radii = [inner, outer, outer, inner];
+    angles.forEach((ang, k) => pts.push(`${(24 + radii[k] * Math.cos(ang)).toFixed(2)} ${(24 + radii[k] * Math.sin(ang)).toFixed(2)}`));
+  }
+  return `M${pts.join('L')}Z`;
+})();
+
 export function GearGlyph({ size = 22, color = '#334155' }: IconProps) {
   return (
-    <Base size={size} color={color} strokeWidth={3}>
+    <Base size={size} color={color} strokeWidth={3.2}>
+      <Path d={GEAR_PATH} />
       <Circle cx={24} cy={24} r={6} />
-      <Path d="M24 4v6M24 38v6M4 24h6M38 24h6M9.9 9.9l4.2 4.2M33.9 33.9l4.2 4.2M9.9 38.1l4.2-4.2M33.9 14.1l4.2-4.2" />
+    </Base>
+  );
+}
+
+export function FilterGlyph({ size = 20, color = '#334155' }: IconProps) {
+  return (
+    <Base size={size} color={color} strokeWidth={3.5}>
+      <Path d="M8 14h32M14 24h20M20 34h8" />
+    </Base>
+  );
+}
+
+export function SearchGlyph({ size = 18, color = '#64748B' }: IconProps) {
+  return (
+    <Base size={size} color={color} strokeWidth={3.5}>
+      <Circle cx={21} cy={21} r={12} />
+      <Path d="M30 30l10 10" />
     </Base>
   );
 }

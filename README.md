@@ -22,20 +22,38 @@ Dos partes:
 - No necesita internet de verdad: basta con que el teléfono y el computador estén en la **misma red wifi/local** del hotel.
 - Reenviar no duplica nada (cada registro tiene un id único) y si dos dispositivos editan lo mismo gana el cambio más reciente.
 
-## Flujo de revisión (teléfono)
+## Estados de una habitación
 
-1. Buscar la habitación (por número o bloque).
-2. Tocarla → **"¿Revisar esta habitación?"** → *Sí*: se guarda la hora de entrada.
-3. Marcar lo consumido del minibar (pestaña *Consumo*). En *Inventario* se ajusta lo que debe tener el minibar; en *Historial* se ven revisiones anteriores.
-4. **"Terminar de revisar"** → **"¿Desea terminar de revisar?"** → queda la hora de entrada y de salida.
-5. Cuando se reponga el minibar: **"Marcar como surtida"** (desde la lista o la revisión).
+**Surtida → Por revisar → Revisada → Surtida**
+
+1. Al empezar el día todas están **surtidas**.
+2. Recepción carga el **Excel de salidas** (columnas: Habitación y, si las hay, Huésped, Vuelo y Tipo). Esas habitaciones quedan **por revisar**, con su huésped y hora de vuelo.
+3. Quien revisa entra, marca lo consumido (o **Sin consumo**) y termina: queda **revisada**, mostrando lo que falta reponer.
+4. Se mantiene revisada hasta que la **surten**; entonces vuelve a **surtida**.
+
+Sobre una habitación revisada se puede:
+- **Confirmar que no consumió nada** (obligatorio cuando quedó sin consumo, después de que el huésped se va).
+- **Agregar consumo**: el huésped sigue en la habitación.
+- **Reportar novedad**: el consumo se encontró cuando el huésped ya se había ido.
+
+## Tipos de habitación
+
+| Código | Tipo | Color |
+|---|---|---|
+| CM | Con minibar | verde |
+| SS | Solo seco (mecato) | amarillo |
+| SM | Sin minibar | naranja |
+| PR | Provisional | rojo |
+| VIP | VIP | negro |
+
+Hay un **inventario global** (todo lo que ofrece Market, con foto y precio) y cada tipo define qué lleva su minibar. Se edita en Recepción → *Inventario*.
 
 ## Vista de recepción (computador)
 
-- Resumen del día: revisadas, por surtir, en revisión, sin revisar y consumo total.
-- Buscar habitaciones y abrirlas: inventario y **consumo histórico** por día (hoy, ayer…), si se surtió o no, y quién.
-- *Registro del día*: todas las revisiones y las habitaciones surtidas en el día; con ‹ › se ven días anteriores.
-- *Configuración*: crear bloques, habitaciones y productos, y fijar el inventario estándar de un bloque completo.
+- *Habitaciones*: resumen (por revisar, revisadas, novedades, surtidas, por reponer) y la cuadrícula; cada habitación abre un panel lateral con huésped, tipo, lo pendiente como factura y el historial.
+- *Reporte del día*: revisadas, sin revisar, surtidas y falta surtir; se descarga para Excel.
+- *Inventario*: global y por tipo; las fotos se suben tocando la imagen del producto.
+- *Bloques*: código y nombre de cada bloque (los rangos de habitaciones son fijos, en `app/src/catalog.json`).
 - Se actualiza sola cada 15 segundos.
 
 ## Puesta en marcha

@@ -6,9 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as local from '../../local/db';
 import { requestSync } from '../../local/sync';
 import type { Inspection, InventoryLine } from '../../types';
-import { money, time } from '../../format';
-import { ProductImage } from '../../icons';
-import { Btn, C, Confirm, Empty, Screen, tabular } from '../../ui';
+import { KIND_LABEL, money, time } from '../../format';
+import { Btn, C, Confirm, Empty, ProductPicture, Receipt, Screen, tabular, TypeBadge } from '../../ui';
 
 type Ask = null | 'finish' | 'none' | 'cancel' | 'leave';
 
@@ -16,6 +15,7 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const phone = width < 600;
+  const wide = width >= 960; // tablet horizontal o computador: factura al lado
   const [insp] = useState<Inspection | null>(() => local.getInspection(inspectionId));
   const [room] = useState(() => (insp ? local.getRoom(insp.room_id) : null));
   const [inventory] = useState<InventoryLine[]>(() => (insp ? local.getInventory(insp.room_id).filter((l) => l.quantity > 0) : []));
@@ -29,7 +29,13 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
       setAsk('leave');
       return true;
     });
-    return () => sub.remove();
+    // En el navegador, cerrar o recargar la pestaña pide confirmación (la revisión queda guardada).
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    if (Platform.OS === 'web') window.addEventListener('beforeunload', warn);
+    return () => {
+      sub.remove();
+      if (Platform.OS === 'web') window.removeEventListener('beforeunload', warn);
+    };
   }, []);
 
   const change = useCallback(
@@ -55,6 +61,11 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
 
   const units = Object.values(consumed).reduce((a, b) => a + b, 0);
   const total = inventory.reduce((sum, l) => sum + (consumed[l.product_id] ?? 0) * l.price, 0);
+  const lines = inventory
+    .filter((l) => (consumed[l.product_id] ?? 0) > 0)
+    .map((l) => ({ product_id: l.product_id, name: l.name, quantity: consumed[l.product_id], unit_price: l.price }));
+  // "Sin consumo" solo aplica a la revisión normal; consumo y novedad existen para registrar algo.
+  const allowEmpty = insp.kind === 'revision';
 
   function confirm() {
     const action = ask;
@@ -78,7 +89,9 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
     <Screen>
       <View style={[st.head, { paddingHorizontal: pad }]}>
         <Text style={[st.number, tabular]}>{room.number}</Text>
+        <TypeBadge type={room.type} size="md" />
         <View style={{ flex: 1 }}>
+          {insp.kind !== 'revision' && <Text style={st.kind}>{KIND_LABEL[insp.kind]}</Text>}
           <Text style={st.guest} numberOfLines={1}>
             {room.guest_name ?? 'Sin huésped'}
           </Text>
@@ -88,7 +101,9 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
         </View>
       </View>
 
+      <View style={{ flex: 1, flexDirection: 'row' }}>
       <ScrollView
+        style={{ flex: 1 }}
         onLayout={(e) => setGridW(e.nativeEvent.layout.width)}
         contentContainerStyle={{ padding: pad, flexDirection: 'row', flexWrap: 'wrap', gap }}
       >
@@ -110,7 +125,7 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
               ]}
             >
               <View style={[st.imageBox, phone && { height: 96 }]}>
-                <ProductImage id={l.product_id} size={phone ? 68 : 84} color={q > 0 ? C.ink : C.body} />
+                <ProductPicture id={l.product_id} image={l.image} size={phone ? 68 : 84} color={q > 0 ? C.ink : C.body} />
               </View>
               <Text style={st.name} numberOfLines={2}>
                 {l.name}
@@ -139,6 +154,16 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
           );
         })}
       </ScrollView>
+      {wide && (
+        <ScrollView style={st.side} contentContainerStyle={{ padding: 16 }}>
+          <Receipt
+            title={`Habitación ${room.number}`}
+            subtitle={`Entrada ${time(insp.started_at)} · ${insp.inspector}`}
+            lines={lines}
+          />
+        </ScrollView>
+      )}
+      </View>
 
       <View style={[st.bar, { paddingHorizontal: pad, paddingBottom: 12 + insets.bottom }]}>
         <View style={[st.summary]}>
@@ -148,16 +173,23 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
         <View style={[st.actions, phone && { flexDirection: 'column-reverse' }]}>
           <View style={[st.actions, { flex: phone ? undefined : 1 }]}>
             <Btn title="Cancelar" variant="quiet" onPress={() => setAsk('cancel')} style={{ flex: 1 }} />
-            <Btn title="Sin consumo" variant="secondary" disabled={units > 0} onPress={() => setAsk('none')} style={{ flex: 1 }} />
+            {allowEmpty && (
+              <Btn title="Sin consumo" variant="secondary" disabled={units > 0} onPress={() => setAsk('none')} style={{ flex: 1 }} />
+            )}
           </View>
-          <Btn title="Terminar revisión" disabled={units === 0} onPress={() => setAsk('finish')} style={{ flex: phone ? undefined : 1 }} />
+          <Btn
+            title={insp.kind === 'novedad' ? 'Guardar novedad' : insp.kind === 'consumo' ? 'Guardar consumo' : 'Terminar revisión'}
+            disabled={units === 0}
+            onPress={() => setAsk('finish')}
+            style={{ flex: phone ? undefined : 1 }}
+          />
         </View>
       </View>
 
       <Confirm
         visible={ask === 'leave'}
         title="La revisión sigue abierta"
-        message="Para salir, termínala, márcala sin consumo o cancélala."
+        message={allowEmpty ? 'Para salir, termínala, márcala sin consumo o cancélala.' : 'Para salir, guárdala o cancélala.'}
         confirmText="Terminar"
         cancelText="Seguir revisando"
         onConfirm={confirm}
@@ -165,7 +197,7 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
       />
       <Confirm
         visible={ask === 'finish'}
-        title="¿Terminar la revisión?"
+        title={insp.kind === 'novedad' ? '¿Guardar la novedad?' : insp.kind === 'consumo' ? '¿Guardar el consumo?' : '¿Terminar la revisión?'}
         message={`${units} ${units === 1 ? 'producto' : 'productos'} · ${money(total)}\nEntrada ${time(insp.started_at)} · salida ${time(Date.now())}`}
         confirmText="Terminar"
         cancelText="Volver"
@@ -200,14 +232,14 @@ const st = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
     paddingVertical: 14,
-    backgroundColor: C.surface,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: C.line,
+    backgroundColor: C.brand,
   },
-  number: { fontSize: 34, fontWeight: '700', color: C.ink, letterSpacing: -1 },
-  guest: { fontSize: 16, fontWeight: '600', color: C.ink },
-  flight: { fontSize: 13, color: C.muted, marginTop: 2 },
-  flightTime: { fontWeight: '600', color: C.body },
+  number: { fontSize: 34, fontWeight: '700', color: C.onBrand, letterSpacing: -1 },
+  guest: { fontSize: 16, fontWeight: '600', color: C.onBrand },
+  flight: { fontSize: 13, color: C.onBrandMuted, marginTop: 2 },
+  flightTime: { fontWeight: '600', color: C.onBrand },
+  kind: { fontSize: 11, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase', color: '#FFD9D9', marginBottom: 1 },
+  side: { width: 340, flexGrow: 0, borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: C.line },
   tile: {
     backgroundColor: C.surface,
     borderRadius: 14,
@@ -216,7 +248,7 @@ const st = StyleSheet.create({
     padding: 10,
     paddingBottom: 14,
   },
-  tileOn: { borderColor: C.ink, borderWidth: 1.5 },
+  tileOn: { borderColor: C.brand, borderWidth: 2 },
   imageBox: {
     height: 116,
     borderRadius: 10,
@@ -235,7 +267,7 @@ const st = StyleSheet.create({
     height: 30,
     borderRadius: 15,
     paddingHorizontal: 8,
-    backgroundColor: C.ink,
+    backgroundColor: C.brand,
     alignItems: 'center',
     justifyContent: 'center',
   },

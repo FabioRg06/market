@@ -1,18 +1,20 @@
-// Sincronización con los teléfonos.
+// Sincronización con las tablets.
 //
-// El teléfono manda lo que guardó sin conexión (push) y recibe todo lo que
+// La tablet manda lo que guardó sin conexión (push) y recibe todo lo que
 // cambió en el servidor desde la última vez (pull). Gana el registro con el
 // `updated_at` más reciente, y todo es idempotente: reenviar lo mismo no duplica.
 import { db, nextRev, currentRev, transaction } from './db.js';
 
+const KINDS = new Set(['revision', 'consumo', 'novedad', 'confirmacion']);
+
 const upsertInspection = db.prepare(`
-  INSERT INTO inspections (id, room_id, inspector, device_id, started_at, finished_at,
+  INSERT INTO inspections (id, room_id, inspector, device_id, kind, started_at, finished_at,
                            restocked_at, restocked_by, notes, updated_at, rev)
-  VALUES (:id, :room_id, :inspector, :device_id, :started_at, :finished_at,
+  VALUES (:id, :room_id, :inspector, :device_id, :kind, :started_at, :finished_at,
           :restocked_at, :restocked_by, :notes, :updated_at, :rev)
   ON CONFLICT(id) DO UPDATE SET
     room_id = excluded.room_id, inspector = excluded.inspector, device_id = excluded.device_id,
-    started_at = excluded.started_at, finished_at = excluded.finished_at,
+    kind = excluded.kind, started_at = excluded.started_at, finished_at = excluded.finished_at,
     restocked_at = excluded.restocked_at, restocked_by = excluded.restocked_by,
     notes = excluded.notes, updated_at = excluded.updated_at, rev = excluded.rev
   WHERE excluded.updated_at >= inspections.updated_at
@@ -47,6 +49,7 @@ export function applyPush(changes = {}, deviceId = null) {
       upsertInspection.run({
         ...pick(row, ['id', 'room_id', 'inspector', 'started_at', 'finished_at',
           'restocked_at', 'restocked_by', 'notes', 'updated_at']),
+        kind: KINDS.has(row.kind) ? row.kind : 'revision',
         device_id: row.device_id ?? deviceId,
         rev: nextRev(),
       });
@@ -75,13 +78,14 @@ export function pullSince(since = 0) {
   const q = (sql, ...params) => db.prepare(sql).all(since, ...params);
   return {
     rev,
-    blocks: q(`SELECT id, name, updated_at FROM blocks WHERE rev > ?`),
-    rooms: q(`SELECT id, block_id, number, active, updated_at FROM rooms WHERE rev > ?`),
-    products: q(`SELECT id, name, price, std_qty, sort, active, updated_at FROM products WHERE rev > ?`),
-    guests: q(`SELECT room_id, guest_name, flight_time, updated_at FROM guests WHERE rev > ?`),
+    blocks: q(`SELECT id, code, name, updated_at FROM blocks WHERE rev > ?`),
+    rooms: q(`SELECT id, block_id, number, type, active, updated_at FROM rooms WHERE rev > ?`),
+    products: q(`SELECT id, name, price, std_qty, sort, image, active, updated_at FROM products WHERE rev > ?`),
+    type_inventory: q(`SELECT type, product_id, quantity, updated_at FROM type_inventory WHERE rev > ?`),
+    guests: q(`SELECT room_id, guest_name, flight_time, review_at, updated_at FROM guests WHERE rev > ?`),
     room_inventory: q(`SELECT room_id, product_id, quantity, updated_at FROM room_inventory WHERE rev > ?`),
     inspections: q(
-      `SELECT id, room_id, inspector, device_id, started_at, finished_at, restocked_at,
+      `SELECT id, room_id, inspector, device_id, kind, started_at, finished_at, restocked_at,
               restocked_by, notes, updated_at
          FROM inspections WHERE rev > ? AND started_at >= ?`,
       minStarted

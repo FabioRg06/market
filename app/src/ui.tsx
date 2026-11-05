@@ -1,7 +1,10 @@
-// Sistema visual de Market: sobrio y limpio. Superficies blancas, tipografía del sistema,
-// un solo color de acción (pizarra oscura) y el estado de cada habitación como único color.
+// Sistema visual de Market: azul rey como color de la app (barras, fondo y botones),
+// superficies blancas y el estado de cada habitación como único color de las tarjetas.
 import React from 'react';
 import {
+  Animated,
+  Easing,
+  Image,
   Modal,
   Pressable,
   StyleProp,
@@ -14,23 +17,31 @@ import {
   ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { RoomStatus } from './types';
+import type { LineItem, RoomStatus, RoomType } from './types';
+import { money, TYPE_BY_CODE } from './format';
+import { ProductImage } from './icons';
 
 export const C = {
-  bg: '#F5F6F8',
+  bg: '#EDF1FA',
+  brand: '#1E40AF',
+  brandDeep: '#172F82',
+  onBrand: '#FFFFFF',
+  onBrandMuted: '#BFCDF3',
   surface: '#FFFFFF',
   ink: '#0F172A',
   body: '#334155',
   muted: '#64748B',
   faint: '#94A3B8',
-  line: '#E2E8F0',
-  primary: '#0F172A',
+  line: '#DCE3F1',
+  primary: '#1E40AF',
   danger: '#B42318',
+  // Los colores verde/amarillo/naranja/rojo son de los tipos de habitación (SS, SM, CM, PR),
+  // así que los estados usan otra gama para no confundirse.
   status: {
-    sin_revisar: { tint: '#FFFFFF', border: '#E2E8F0', solid: '#94A3B8', ink: '#475569' },
-    en_revision: { tint: '#EFF5FF', border: '#C7D9FA', solid: '#3567D6', ink: '#1E4BA8' },
-    revisada: { tint: '#FFF7EB', border: '#F2D7AA', solid: '#C77D12', ink: '#8A5308' },
-    surtida: { tint: '#EEF8F2', border: '#BFE3CC', solid: '#2E8452', ink: '#1E6139' },
+    surtida: { tint: '#FFFFFF', border: '#DCE3F1', solid: '#94A3B8', ink: '#475569' },
+    por_revisar: { tint: '#EAF0FF', border: '#9DB4F2', solid: '#2F57D6', ink: '#1E3A9C' },
+    en_revision: { tint: '#E6F7FA', border: '#8ED3E0', solid: '#0E8FA8', ink: '#0B6577' },
+    revisada: { tint: '#F3EEFF', border: '#C9B6F5', solid: '#7247D6', ink: '#4F2CA3' },
   } as Record<RoomStatus, { tint: string; border: string; solid: string; ink: string }>,
 };
 
@@ -39,7 +50,12 @@ export const tabular: TextStyle = { fontVariant: ['tabular-nums'] };
 
 export function Screen({ children, style }: { children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
   const insets = useSafeAreaInsets();
-  return <View style={[{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }, style]}>{children}</View>;
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <View style={{ height: insets.top, backgroundColor: C.brand }} />
+      <View style={[{ flex: 1 }, style]}>{children}</View>
+    </View>
+  );
 }
 
 export function Header({
@@ -185,6 +201,109 @@ export function Confirm({
   );
 }
 
+/** Etiqueta del tipo de habitación con su color (SS amarillo, SM naranja, CM verde, PR rojo, VIP). */
+export function TypeBadge({ type, size = 'sm' }: { type: RoomType; size?: 'sm' | 'md' }) {
+  const t = TYPE_BY_CODE[type] ?? TYPE_BY_CODE.CM;
+  const md = size === 'md';
+  return (
+    <View
+      accessibilityLabel={`Tipo ${t.name}`}
+      style={{ backgroundColor: t.color, borderRadius: 6, paddingHorizontal: md ? 8 : 5, paddingVertical: md ? 3 : 1 }}
+    >
+      <Text style={{ color: t.ink, fontSize: md ? 12 : 10, fontWeight: '800', letterSpacing: 0.4 }}>{t.code}</Text>
+    </View>
+  );
+}
+
+/** Foto real del producto si recepción la subió; si no, la ilustración. */
+export function ProductPicture({ id, image, size, color }: { id: string; image?: string | null; size: number; color?: string }) {
+  if (image) return <Image source={{ uri: image }} style={{ width: size * 1.4, height: size * 1.4, borderRadius: 8 }} resizeMode="contain" />;
+  return <ProductImage id={id} size={size} color={color} />;
+}
+
+/** Panel que entra desde la derecha, por encima del contenido (drawer). */
+export function Drawer({ open, onClose, width = 460, children }: { open: boolean; onClose: () => void; width?: number; children: React.ReactNode }) {
+  const insets = useSafeAreaInsets();
+  const x = React.useRef(new Animated.Value(width)).current;
+  const [mounted, setMounted] = React.useState(open);
+  React.useEffect(() => {
+    if (open) setMounted(true);
+    Animated.timing(x, {
+      toValue: open ? 0 : width,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => !open && setMounted(false));
+  }, [open, width, x]);
+  if (!mounted) return null;
+  return (
+    <Modal visible transparent onRequestClose={onClose} animationType="none">
+      <View style={{ flex: 1, flexDirection: 'row' }}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(15,23,42,0.35)' }} onPress={onClose} accessibilityLabel="Cerrar" />
+        <Animated.View
+          style={{
+            width,
+            maxWidth: '100%',
+            backgroundColor: C.bg,
+            paddingTop: insets.top,
+            transform: [{ translateX: x }],
+            shadowColor: '#0F172A',
+            shadowOpacity: 0.25,
+            shadowRadius: 24,
+            elevation: 16,
+          }}
+        >
+          {children}
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+/** Consumo presentado como factura. */
+export function Receipt({
+  title,
+  subtitle,
+  lines,
+  footer,
+}: {
+  title: string;
+  subtitle?: string;
+  lines: LineItem[];
+  footer?: React.ReactNode;
+}) {
+  const total = lines.reduce((t, l) => t + l.quantity * l.unit_price, 0);
+  return (
+    <View style={s.receipt}>
+      <View style={{ gap: 2 }}>
+        <Text style={s.receiptTitle}>{title}</Text>
+        {subtitle ? <Text style={s.receiptSub}>{subtitle}</Text> : null}
+      </View>
+      <View style={s.receiptRule} />
+      {lines.length === 0 ? (
+        <Text style={[s.receiptSub, { paddingVertical: 6 }]}>Sin consumo</Text>
+      ) : (
+        lines.map((l) => (
+          <View key={l.product_id} style={s.receiptLine}>
+            <Text style={[s.receiptQty, tabular]}>{l.quantity}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.receiptName}>{l.name}</Text>
+              <Text style={[s.receiptSub, tabular]}>{money(l.unit_price)} c/u</Text>
+            </View>
+            <Text style={[s.receiptAmount, tabular]}>{money(l.quantity * l.unit_price)}</Text>
+          </View>
+        ))
+      )}
+      <View style={s.receiptRule} />
+      <View style={s.receiptLine}>
+        <Text style={[s.receiptName, { flex: 1, fontWeight: '700' }]}>Total</Text>
+        <Text style={[s.receiptTotal, tabular]}>{money(total)}</Text>
+      </View>
+      {footer}
+    </View>
+  );
+}
+
 export function Empty({ text }: { text: string }) {
   return <Text style={s.empty}>{text}</Text>;
 }
@@ -196,14 +315,12 @@ export const s = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: C.surface,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: C.line,
+    backgroundColor: C.brand,
   },
   back: { paddingRight: 2 },
-  backText: { fontSize: 32, lineHeight: 34, color: C.ink, fontWeight: '300' },
-  eyebrow: { fontSize: 12, fontWeight: '600', color: C.muted, marginBottom: 1 },
-  title: { fontSize: 20, fontWeight: '700', color: C.ink, letterSpacing: -0.3 },
+  backText: { fontSize: 32, lineHeight: 34, color: C.onBrand, fontWeight: '300' },
+  eyebrow: { fontSize: 12, fontWeight: '600', color: C.onBrandMuted, marginBottom: 1 },
+  title: { fontSize: 20, fontWeight: '700', color: C.onBrand, letterSpacing: -0.3 },
   btn: {
     minHeight: 48,
     paddingHorizontal: 18,
@@ -250,6 +367,22 @@ export const s = StyleSheet.create({
   dialogTitle: { fontSize: 19, fontWeight: '700', color: C.ink, letterSpacing: -0.3 },
   dialogMsg: { fontSize: 15, color: C.muted, lineHeight: 22 },
   dialogRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  receipt: {
+    backgroundColor: C.surface,
+    borderRadius: 12,
+    padding: 16,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: C.line,
+  },
+  receiptTitle: { fontSize: 15, fontWeight: '700', color: C.ink },
+  receiptSub: { fontSize: 12, color: C.muted },
+  receiptRule: { borderBottomWidth: 1, borderBottomColor: C.line, borderStyle: 'dashed', marginVertical: 2 },
+  receiptLine: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  receiptQty: { minWidth: 24, fontSize: 15, fontWeight: '700', color: C.brand },
+  receiptName: { fontSize: 14, color: C.ink },
+  receiptAmount: { fontSize: 14, fontWeight: '600', color: C.ink },
+  receiptTotal: { fontSize: 18, fontWeight: '800', color: C.ink },
   empty: { textAlign: 'center', color: C.muted, padding: 32, fontSize: 15, lineHeight: 22 },
   label: { fontSize: 12, fontWeight: '600', color: C.muted, marginBottom: 6, letterSpacing: 0.2 },
   h2: { fontSize: 15, fontWeight: '600', color: C.ink },

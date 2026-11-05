@@ -1,25 +1,25 @@
-// Base de datos local del teléfono (SQLite, como las bases internas de Android).
+// Base de datos local de la tablet (SQLite, como las bases internas de Android).
 // Todo lo que hace quien revisa se guarda aquí primero; las filas con `dirty = 1`
 // son las que aún no llegan al servidor de recepción.
 import * as SQLite from 'expo-sqlite';
-import { randomUUID } from 'expo-crypto';
 import type {
   Inspection,
   InspectionItem,
-  InspectionSummary,
+  InspectionKind,
   InspectionWithItems,
   InventoryLine,
+  LineItem,
   RoomInventory,
   RoomRow,
   SyncPayload,
 } from '../types';
-import { roomStatus, startOfDay } from '../format';
+import { roomState } from '../format';
+import { uuid } from '../uuid';
 import catalog from '../catalog.json';
 
 const db = SQLite.openDatabaseSync('market.db');
 
-// Si cambia el esquema se rehace la base (solo guarda copias de lo que tiene el servidor
-// y lo pendiente; en producción conviene migrar en vez de borrar).
+// Versiones viejas (antes de la 2) se rehacen; de ahí en adelante solo se agregan columnas.
 const SCHEMA_VERSION = 2;
 const version = db.getFirstSync<{ user_version: number }>('PRAGMA user_version')?.user_version ?? 0;
 if (version < SCHEMA_VERSION) {
@@ -48,6 +48,10 @@ db.execSync(`
     std_qty INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1, updated_at INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS type_inventory (
+    type TEXT NOT NULL, product_id TEXT NOT NULL, quantity INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL, PRIMARY KEY (type, product_id)
+  );
   CREATE TABLE IF NOT EXISTS guests (
     room_id TEXT PRIMARY KEY, guest_name TEXT, flight_time TEXT, updated_at INTEGER NOT NULL
   );
@@ -70,22 +74,39 @@ db.execSync(`
   CREATE INDEX IF NOT EXISTS idx_items_insp ON inspection_items(inspection_id);
 `);
 
-// El catálogo fijo (700 habitaciones, 13 productos) viene dentro de la app: así se puede
-// revisar desde el primer día aunque el teléfono nunca haya visto el servidor.
-if ((db.getFirstSync<{ n: number }>(`SELECT COUNT(*) AS n FROM rooms`)?.n ?? 0) === 0) {
-  db.withTransactionSync(() => {
-    for (const b of catalog.blocks) {
-      db.runSync(`INSERT OR IGNORE INTO blocks (id, name, updated_at) VALUES (?, ?, 0)`, b.id, b.name);
-      for (let n = b.from; n <= b.to; n++)
-        db.runSync(`INSERT OR IGNORE INTO rooms (id, block_id, number, updated_at) VALUES (?, ?, ?, 0)`, `r${n}`, b.id, String(n));
-    }
-    for (const p of catalog.products)
-      db.runSync(
-        `INSERT OR IGNORE INTO products (id, name, price, std_qty, sort, updated_at) VALUES (?, ?, ?, ?, ?, 0)`,
-        p.id, p.name, p.price, p.std_qty, p.sort
-      );
-  });
+// Columnas nuevas: se agregan sin perder lo que la tablet tenga guardado.
+function addColumn(table: string, column: string, definition: string) {
+  const cols = db.getAllSync<{ name: string }>(`PRAGMA table_info(${table})`);
+  if (cols.some((c) => c.name === column)) return false;
+  db.execSync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  return true;
 }
+const migrated = [
+  addColumn('blocks', 'code', 'TEXT'),
+  addColumn('rooms', 'type', `TEXT NOT NULL DEFAULT '${catalog.defaultType}'`),
+  addColumn('products', 'image', 'TEXT'),
+  addColumn('guests', 'review_at', 'INTEGER'),
+  addColumn('inspections', 'kind', "TEXT NOT NULL DEFAULT 'revision'"),
+].some(Boolean);
+// Con columnas nuevas se vuelve a descargar todo del servidor para llenarlas.
+if (migrated) db.runSync(`DELETE FROM meta WHERE key = 'last_rev'`);
+
+// El catálogo fijo viene dentro de la app: así se puede revisar desde el primer día
+// aunque la tablet nunca haya visto el servidor.
+db.withTransactionSync(() => {
+  for (const b of catalog.blocks) {
+    db.runSync(`INSERT OR IGNORE INTO blocks (id, name, code, updated_at) VALUES (?, ?, ?, 0)`, b.id, b.name, b.code);
+    db.runSync(`UPDATE blocks SET code = ? WHERE id = ? AND code IS NULL`, b.code, b.id);
+    for (let n = b.from; n <= b.to; n++)
+      db.runSync(`INSERT OR IGNORE INTO rooms (id, block_id, number, updated_at) VALUES (?, ?, ?, 0)`, `r${n}`, b.id, String(n));
+  }
+  for (const p of catalog.products)
+    db.runSync(`INSERT OR IGNORE INTO products (id, name, price, sort, updated_at) VALUES (?, ?, ?, ?, 0)`, p.id, p.name, p.price, p.sort);
+  if ((db.getFirstSync<{ n: number }>(`SELECT COUNT(*) AS n FROM type_inventory`)?.n ?? 0) === 0)
+    for (const [type, items] of Object.entries(catalog.typeInventory))
+      for (const [productId, qty] of Object.entries(items))
+        db.runSync(`INSERT OR IGNORE INTO type_inventory (type, product_id, quantity, updated_at) VALUES (?, ?, ?, 0)`, type, productId, qty);
+});
 
 // ---------- meta ----------
 
@@ -107,57 +128,88 @@ export function hasCatalog() {
 
 // ---------- lecturas ----------
 
+function itemsByInspection(ids: string[]): Map<string, LineItem[]> {
+  const map = new Map<string, LineItem[]>();
+  if (!ids.length) return map;
+  const rows = db.getAllSync<LineItem & { inspection_id: string }>(
+    `SELECT ii.inspection_id, ii.product_id, p.name, ii.quantity, ii.unit_price
+       FROM inspection_items ii JOIN products p ON p.id = ii.product_id
+      WHERE ii.quantity > 0 AND ii.inspection_id IN (${ids.map(() => '?').join(',')}) ORDER BY p.sort`,
+    ...ids
+  );
+  for (const { inspection_id, ...it } of rows) {
+    if (!map.has(inspection_id)) map.set(inspection_id, []);
+    map.get(inspection_id)!.push(it);
+  }
+  return map;
+}
+
 function withItems(inspections: Inspection[]): InspectionWithItems[] {
+  const items = itemsByInspection(inspections.map((i) => i.id));
   return inspections.map((i) => {
-    const items = db.getAllSync<InspectionWithItems['items'][number]>(
-      `SELECT ii.product_id, p.name, ii.quantity, ii.unit_price
-         FROM inspection_items ii JOIN products p ON p.id = ii.product_id
-        WHERE ii.inspection_id = ? AND ii.quantity > 0 ORDER BY p.sort`,
-      i.id
-    );
+    const list = items.get(i.id) ?? [];
     return {
       ...i,
-      items,
-      units: items.reduce((s, it) => s + it.quantity, 0),
-      total: items.reduce((s, it) => s + it.quantity * it.unit_price, 0),
+      items: list,
+      units: list.reduce((s, it) => s + it.quantity, 0),
+      total: list.reduce((s, it) => s + it.quantity * it.unit_price, 0),
     };
   });
 }
 
-/** Las 700 habitaciones con huésped y estado del día. Se filtra en memoria (es rápido). */
+const roomSql = `
+  SELECT r.id, r.number, r.type, r.block_id, b.code AS block_code, b.name AS block_name,
+         g.guest_name, g.flight_time, g.review_at
+    FROM rooms r JOIN blocks b ON b.id = r.block_id LEFT JOIN guests g ON g.room_id = r.id`;
+
+type RoomBase = Omit<RoomRow, keyof import('../types').RoomState>;
+
+function statesFor(rooms: RoomBase[], roomId?: string): RoomRow[] {
+  const where = roomId ? 'AND room_id = ?' : '';
+  const args = roomId ? [roomId] : [];
+  const pending = db.getAllSync<Inspection>(
+    `SELECT * FROM inspections WHERE finished_at IS NOT NULL AND restocked_at IS NULL ${where} ORDER BY finished_at`,
+    ...args
+  );
+  const items = itemsByInspection(pending.map((i) => i.id));
+  const pendingBy = new Map<string, { kind: InspectionKind; inspector: string; finished_at: number; items: LineItem[] }[]>();
+  for (const i of pending) {
+    if (!pendingBy.has(i.room_id)) pendingBy.set(i.room_id, []);
+    pendingBy.get(i.room_id)!.push({ kind: i.kind, inspector: i.inspector, finished_at: i.finished_at!, items: items.get(i.id) ?? [] });
+  }
+  const open = new Set(
+    db.getAllSync<{ room_id: string }>(`SELECT room_id FROM inspections WHERE finished_at IS NULL ${where}`, ...args).map((r) => r.room_id)
+  );
+  const agg = db.getAllSync<{ room_id: string; fin: number | null; res: number | null }>(
+    `SELECT room_id, MAX(finished_at) AS fin, MAX(restocked_at) AS res FROM inspections WHERE 1 = 1 ${where} GROUP BY room_id`,
+    ...args
+  );
+  const aggBy = new Map(agg.map((a) => [a.room_id, a]));
+  return rooms.map((r) => ({
+    ...r,
+    ...roomState(r.review_at, pendingBy.get(r.id) ?? [], open.has(r.id), aggBy.get(r.id)?.fin ?? null, aggBy.get(r.id)?.res ?? null),
+  }));
+}
+
+/** Las 700 habitaciones con huésped, tipo y estado. Se filtra en memoria (es rápido). */
 export function listRooms(): RoomRow[] {
-  const rooms = db.getAllSync<Omit<RoomRow, 'status' | 'last'>>(
-    `SELECT r.id, r.number, r.block_id, b.name AS block_name, g.guest_name, g.flight_time
-       FROM rooms r JOIN blocks b ON b.id = r.block_id LEFT JOIN guests g ON g.room_id = r.id
-      WHERE r.active = 1 ORDER BY CAST(r.number AS INTEGER)`
-  );
-  const today = db.getAllSync<InspectionSummary & { room_id: string }>(
-    `SELECT i.id, i.room_id, i.inspector, i.started_at, i.finished_at, i.restocked_at, i.restocked_by,
-            COALESCE(SUM(ii.quantity), 0) AS units, COALESCE(SUM(ii.quantity * ii.unit_price), 0) AS total
-       FROM inspections i LEFT JOIN inspection_items ii ON ii.inspection_id = i.id
-      WHERE i.started_at >= ? GROUP BY i.id ORDER BY i.started_at DESC`,
-    startOfDay(Date.now())
-  );
-  const latest = new Map<string, InspectionSummary>();
-  for (const i of today) if (!latest.has(i.room_id)) latest.set(i.room_id, i);
-  return rooms.map((r) => {
-    const last = latest.get(r.id) ?? null;
-    return { ...r, status: roomStatus(last), last };
-  });
+  return statesFor(db.getAllSync<RoomBase>(`${roomSql} WHERE r.active = 1 ORDER BY CAST(r.number AS INTEGER)`));
 }
 
-export function getRoom(roomId: string) {
-  return db.getFirstSync<{ id: string; number: string; block_name: string; guest_name: string | null; flight_time: string | null }>(
-    `SELECT r.id, r.number, b.name AS block_name, g.guest_name, g.flight_time
-       FROM rooms r JOIN blocks b ON b.id = r.block_id LEFT JOIN guests g ON g.room_id = r.id WHERE r.id = ?`,
-    roomId
-  );
+export function getRoom(roomId: string): RoomRow | null {
+  const r = db.getFirstSync<RoomBase>(`${roomSql} WHERE r.id = ?`, roomId);
+  return r ? statesFor([r], roomId)[0] : null;
 }
 
+/** Lo que lleva el minibar: lo propio de la habitación o, si no, lo de su tipo. */
 export function getInventory(roomId: string): InventoryLine[] {
   return db.getAllSync<InventoryLine>(
-    `SELECT p.id AS product_id, p.name, p.price, COALESCE(ri.quantity, p.std_qty) AS quantity
-       FROM products p LEFT JOIN room_inventory ri ON ri.product_id = p.id AND ri.room_id = ?
+    `SELECT p.id AS product_id, p.name, p.price, p.image,
+            COALESCE(ri.quantity, ti.quantity, 0) AS quantity
+       FROM products p
+       JOIN rooms r ON r.id = ?
+       LEFT JOIN room_inventory ri ON ri.product_id = p.id AND ri.room_id = r.id
+       LEFT JOIN type_inventory ti ON ti.product_id = p.id AND ti.type = r.type
       WHERE p.active = 1 ORDER BY p.sort`,
     roomId
   );
@@ -202,11 +254,7 @@ export function getConsumption(inspectionId: string): Record<string, number> {
 
 export function roomHistory(roomId: string, limit = 10): InspectionWithItems[] {
   return withItems(
-    db.getAllSync<Inspection>(
-      `SELECT * FROM inspections WHERE room_id = ? ORDER BY started_at DESC LIMIT ?`,
-      roomId,
-      limit
-    )
+    db.getAllSync<Inspection>(`SELECT * FROM inspections WHERE room_id = ? ORDER BY started_at DESC LIMIT ?`, roomId, limit)
   );
 }
 
@@ -216,20 +264,21 @@ export function pendingCount(): number {
 
 // ---------- escrituras (funcionan sin conexión) ----------
 
-export function startInspection(roomId: string, inspector: string, deviceId: string): string {
-  const id = randomUUID();
+export function startInspection(roomId: string, inspector: string, deviceId: string, kind: InspectionKind = 'revision'): string {
+  const id = uuid();
   const now = Date.now();
   db.runSync(
-    `INSERT INTO inspections (id, room_id, inspector, device_id, started_at, updated_at, dirty)
-     VALUES (?, ?, ?, ?, ?, ?, 1)`,
-    id,
-    roomId,
-    inspector,
-    deviceId,
-    now,
-    now
+    `INSERT INTO inspections (id, room_id, inspector, device_id, kind, started_at, updated_at, dirty)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+    id, roomId, inspector, deviceId, kind, now, now
   );
   return id;
+}
+
+/** Se volvió a revisar una habitación sin consumo y efectivamente no faltaba nada. */
+export function confirmNoConsumption(roomId: string, inspector: string, deviceId: string) {
+  const id = startInspection(roomId, inspector, deviceId, 'confirmacion');
+  finishInspection(id, '');
 }
 
 export function setConsumed(inspectionId: string, productId: string, quantity: number, unitPrice: number) {
@@ -239,12 +288,7 @@ export function setConsumed(inspectionId: string, productId: string, quantity: n
      VALUES (?, ?, ?, ?, ?, ?, 1)
      ON CONFLICT(id) DO UPDATE SET quantity = excluded.quantity, unit_price = excluded.unit_price,
        updated_at = excluded.updated_at, dirty = 1`,
-    `${inspectionId}:${productId}`,
-    inspectionId,
-    productId,
-    Math.max(0, quantity),
-    unitPrice,
-    now
+    `${inspectionId}:${productId}`, inspectionId, productId, Math.max(0, quantity), unitPrice, now
   );
 }
 
@@ -252,10 +296,7 @@ export function finishInspection(id: string, notes: string) {
   const now = Date.now();
   db.runSync(
     `UPDATE inspections SET finished_at = ?, notes = ?, updated_at = ?, dirty = 1 WHERE id = ?`,
-    now,
-    notes.trim() || null,
-    now,
-    id
+    now, notes.trim() || null, now, id
   );
 }
 
@@ -265,15 +306,13 @@ export function finishWithoutConsumption(id: string, notes: string) {
   db.withTransactionSync(() => {
     db.runSync(
       `UPDATE inspection_items SET quantity = 0, updated_at = ?, dirty = 1 WHERE inspection_id = ? AND quantity > 0`,
-      now,
-      id
+      now, id
     );
     finishInspection(id, notes);
   });
 }
 
 export function cancelInspection(id: string) {
-  // Solo se puede cancelar si nunca llegó al servidor.
   db.withTransactionSync(() => {
     db.runSync(`DELETE FROM inspection_items WHERE inspection_id = ?`, id);
     db.runSync(`DELETE FROM inspections WHERE id = ?`, id);
@@ -284,15 +323,13 @@ export function wasSynced(id: string) {
   return getMeta(`synced:${id}`) === '1';
 }
 
-export function markRestocked(id: string, by: string) {
+/** Surtir: todas las revisiones pendientes de la habitación quedan surtidas. */
+export function restockRoom(roomId: string, by: string) {
   const now = Date.now();
   db.runSync(
     `UPDATE inspections SET restocked_at = ?, restocked_by = ?, updated_at = ?, dirty = 1
-      WHERE id = ? AND restocked_at IS NULL`,
-    now,
-    by,
-    now,
-    id
+      WHERE room_id = ? AND finished_at IS NOT NULL AND restocked_at IS NULL`,
+    now, by, now, roomId
   );
 }
 
@@ -301,10 +338,7 @@ export function setInventoryQty(roomId: string, productId: string, quantity: num
     `INSERT INTO room_inventory (room_id, product_id, quantity, updated_at, dirty) VALUES (?, ?, ?, ?, 1)
      ON CONFLICT(room_id, product_id) DO UPDATE SET quantity = excluded.quantity,
        updated_at = excluded.updated_at, dirty = 1`,
-    roomId,
-    productId,
-    Math.max(0, quantity),
-    Date.now()
+    roomId, productId, Math.max(0, quantity), Date.now()
   );
 }
 
@@ -334,9 +368,7 @@ export function markClean(sent: ReturnType<typeof getDirty>) {
     for (const r of sent.room_inventory)
       db.runSync(
         `UPDATE room_inventory SET dirty = 0 WHERE room_id = ? AND product_id = ? AND updated_at = ?`,
-        r.room_id,
-        r.product_id,
-        r.updated_at
+        r.room_id, r.product_id, r.updated_at
       );
   });
 }
@@ -346,30 +378,36 @@ export function applyPull(data: SyncPayload) {
   db.withTransactionSync(() => {
     for (const b of data.blocks)
       db.runSync(
-        `INSERT INTO blocks (id, name, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at`,
-        b.id, b.name, b.updated_at
+        `INSERT INTO blocks (id, name, code, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET name = excluded.name, code = excluded.code, updated_at = excluded.updated_at`,
+        b.id, b.name, b.code, b.updated_at
       );
     for (const r of data.rooms)
       db.runSync(
-        `INSERT INTO rooms (id, block_id, number, active, updated_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET block_id = excluded.block_id, number = excluded.number,
+        `INSERT INTO rooms (id, block_id, number, type, active, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET block_id = excluded.block_id, number = excluded.number, type = excluded.type,
            active = excluded.active, updated_at = excluded.updated_at`,
-        r.id, r.block_id, r.number, r.active, r.updated_at
+        r.id, r.block_id, r.number, r.type ?? catalog.defaultType, r.active, r.updated_at
       );
     for (const p of data.products)
       db.runSync(
-        `INSERT INTO products (id, name, price, std_qty, sort, active, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO products (id, name, price, std_qty, sort, image, active, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET name = excluded.name, price = excluded.price, std_qty = excluded.std_qty,
-           sort = excluded.sort, active = excluded.active, updated_at = excluded.updated_at`,
-        p.id, p.name, p.price, p.std_qty, p.sort, p.active, p.updated_at
+           sort = excluded.sort, image = excluded.image, active = excluded.active, updated_at = excluded.updated_at`,
+        p.id, p.name, p.price, p.std_qty, p.sort, p.image ?? null, p.active, p.updated_at
+      );
+    for (const t of data.type_inventory ?? [])
+      db.runSync(
+        `INSERT INTO type_inventory (type, product_id, quantity, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(type, product_id) DO UPDATE SET quantity = excluded.quantity, updated_at = excluded.updated_at`,
+        t.type, t.product_id, t.quantity, t.updated_at
       );
     for (const g of data.guests ?? [])
       db.runSync(
-        `INSERT INTO guests (room_id, guest_name, flight_time, updated_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT(room_id) DO UPDATE SET guest_name = excluded.guest_name,
-           flight_time = excluded.flight_time, updated_at = excluded.updated_at`,
-        g.room_id, g.guest_name, g.flight_time, g.updated_at
+        `INSERT INTO guests (room_id, guest_name, flight_time, review_at, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(room_id) DO UPDATE SET guest_name = excluded.guest_name, flight_time = excluded.flight_time,
+           review_at = excluded.review_at, updated_at = excluded.updated_at`,
+        g.room_id, g.guest_name, g.flight_time, g.review_at ?? null, g.updated_at
       );
     for (const ri of data.room_inventory)
       db.runSync(
@@ -381,16 +419,16 @@ export function applyPull(data: SyncPayload) {
       );
     for (const i of data.inspections) {
       db.runSync(
-        `INSERT INTO inspections (id, room_id, inspector, device_id, started_at, finished_at,
+        `INSERT INTO inspections (id, room_id, inspector, device_id, kind, started_at, finished_at,
                                   restocked_at, restocked_by, notes, updated_at, dirty)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
          ON CONFLICT(id) DO UPDATE SET room_id = excluded.room_id, inspector = excluded.inspector,
-           device_id = excluded.device_id, started_at = excluded.started_at,
+           device_id = excluded.device_id, kind = excluded.kind, started_at = excluded.started_at,
            finished_at = excluded.finished_at, restocked_at = excluded.restocked_at,
            restocked_by = excluded.restocked_by, notes = excluded.notes,
            updated_at = excluded.updated_at, dirty = 0
          WHERE inspections.dirty = 0 OR excluded.updated_at > inspections.updated_at`,
-        i.id, i.room_id, i.inspector, i.device_id, i.started_at, i.finished_at,
+        i.id, i.room_id, i.inspector, i.device_id, i.kind ?? 'revision', i.started_at, i.finished_at,
         i.restocked_at, i.restocked_by, i.notes, i.updated_at
       );
       setMeta(`synced:${i.id}`, '1');

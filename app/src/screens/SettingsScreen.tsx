@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Platform, ScrollView, Text, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import { api } from '../api';
 import { getSettings, saveSettings } from '../settings';
 import { syncNow, useSyncState } from '../local/sync';
@@ -55,12 +55,10 @@ export default function SettingsScreen({ onBack, onChangeRole }: { onBack: () =>
     <Screen>
       <Header title="Ajustes" onBack={onBack} />
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16, maxWidth: 560, width: '100%', alignSelf: 'center' }}>
-        {Platform.OS !== 'web' && (
-          <View>
-            <Text style={s.label}>Tu nombre (quien revisa)</Text>
-            <Input value={name} onChangeText={setName} placeholder="Ej. María López" />
-          </View>
-        )}
+        <View>
+          <Text style={s.label}>Tu nombre (quien revisa)</Text>
+          <Input value={name} onChangeText={setName} placeholder="Ej. María López" />
+        </View>
         <View>
           <Text style={s.label}>Dirección del servidor de recepción</Text>
           <Input

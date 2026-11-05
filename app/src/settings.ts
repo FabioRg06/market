@@ -2,7 +2,7 @@
 // y un id único del dispositivo. Se guardan en el propio teléfono / navegador.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { randomUUID } from 'expo-crypto';
+import { uuid } from './uuid';
 
 export interface Settings {
   serverUrl: string;
@@ -33,7 +33,7 @@ export async function getSettings(): Promise<Settings> {
   cache = {
     serverUrl: stored.serverUrl || defaultServerUrl(),
     inspectorName: stored.inspectorName ?? '',
-    deviceId: stored.deviceId || randomUUID(),
+    deviceId: stored.deviceId || uuid(),
   };
   if (!stored.deviceId) await saveSettings({});
   return cache;

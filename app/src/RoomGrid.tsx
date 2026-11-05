@@ -1,16 +1,18 @@
-// Filtros (estado, bloque, búsqueda) y cuadrícula de habitaciones. Lo usan las dos vistas.
+// Búsqueda, filtros y cuadrícula de habitaciones. Lo usan las dos vistas.
+// La búsqueda y los bloques van dentro de la lista: al bajar se esconden y las habitaciones
+// ocupan toda la pantalla; al volver arriba aparecen. Los estados van en el botón de filtros.
 // Pensado para 700 tarjetas: altura fija, filtros en memoria y solo se dibuja lo visible.
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { FlatList, LayoutChangeEvent, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { FlatList, LayoutChangeEvent, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { RoomRow, RoomStatus } from './types';
-import { STATUS_LABEL } from './format';
-import { C, Empty, Input, tabular } from './ui';
-import { CloudPending, DoorGlyph } from './icons';
+import { missingText, STATUS_LABEL } from './format';
+import { Btn, C, Empty, s, tabular, TypeBadge } from './ui';
+import { CloudPending, DoorGlyph, FilterGlyph, SearchGlyph } from './icons';
 import catalog from './catalog.json';
 
-const CARD_H = 112;
+const CARD_H = 132;
 const GAP = 10;
-const STATUSES: RoomStatus[] = ['sin_revisar', 'en_revision', 'revisada', 'surtida'];
+const STATUSES: RoomStatus[] = ['por_revisar', 'en_revision', 'revisada', 'surtida'];
 const NO_PENDING = new Set<string>();
 
 export default function RoomGrid({
@@ -18,21 +20,25 @@ export default function RoomGrid({
   onPress,
   selectedId,
   pendingIds = NO_PENDING,
+  reserveRight = 0,
   emptyText = 'Ninguna habitación coincide con el filtro.',
 }: {
   rooms: RoomRow[];
   onPress: (room: RoomRow) => void;
   selectedId?: string | null;
   pendingIds?: Set<string>;
+  /** Espacio a la derecha de la búsqueda para un botón flotante (la tuerca). */
+  reserveRight?: number;
   emptyText?: string;
 }) {
   const [width, setWidth] = useState(0);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<RoomStatus | null>(null);
   const [block, setBlock] = useState<string | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const counts = useMemo(() => {
-    const c: Record<RoomStatus, number> = { sin_revisar: 0, en_revision: 0, revisada: 0, surtida: 0 };
+    const c: Record<RoomStatus, number> = { surtida: 0, por_revisar: 0, en_revision: 0, revisada: 0 };
     for (const r of rooms) if (!block || r.block_id === block) c[r.status]++;
     return c;
   }, [rooms, block]);
@@ -50,63 +56,68 @@ export default function RoomGrid({
   const phone = width > 0 && width < 600;
   const pad = phone ? 12 : 20;
   const minCard = phone ? 140 : 168;
-  const columns = Math.max(2, Math.floor((width - pad * 2 + GAP) / (minCard + GAP)));
-  const cardW = width ? (width - pad * 2 - GAP * (columns - 1)) / columns : 0;
+  // En web la barra de desplazamiento ocupa espacio; en el teléfono va encima.
+  const inner = width - pad * 2 - (Platform.OS === 'web' ? 16 : 0);
+  const columns = Math.max(2, Math.floor((inner + GAP) / (minCard + GAP)));
+  const cardW = width ? Math.floor((inner - GAP * (columns - 1)) / columns) : 0;
   const press = useCallback((r: RoomRow) => onPress(r), [onPress]);
+
+  const header = (
+    <View style={g.header}>
+      <View style={[s.row, { gap: 8, paddingRight: reserveRight }]}>
+        <View style={g.search}>
+          <SearchGlyph size={18} color={C.muted} />
+          <TextInput
+            placeholder="Buscar número o huésped"
+            placeholderTextColor={C.faint}
+            value={query}
+            onChangeText={setQuery}
+            autoCorrect={false}
+            style={g.searchInput}
+          />
+        </View>
+        <Pressable
+          onPress={() => setFiltersOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Filtros"
+          style={[g.iconBtn, status && { backgroundColor: C.brand, borderColor: C.brand }]}
+        >
+          <FilterGlyph size={20} color={status ? C.onBrand : C.body} />
+        </Pressable>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+        <Tab label="Todos" active={!block} onPress={() => setBlock(null)} />
+        {catalog.blocks.map((b) => (
+          <Tab key={b.id} label={rooms.find((r) => r.block_id === b.id)?.block_code ?? b.code} active={block === b.id} onPress={() => setBlock(block === b.id ? null : b.id)} />
+        ))}
+      </ScrollView>
+      {status && (
+        <Pressable onPress={() => setStatus(null)} style={g.activeFilter} accessibilityRole="button" accessibilityLabel="Quitar filtro">
+          <View style={[g.dot, { backgroundColor: C.status[status].solid }]} />
+          <Text style={g.activeFilterText}>{STATUS_LABEL[status]}</Text>
+          <Text style={[g.activeFilterText, { color: C.muted }]}>✕</Text>
+        </Pressable>
+      )}
+    </View>
+  );
 
   return (
     <View style={{ flex: 1 }} onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
-      <View style={[g.filters, { paddingHorizontal: pad }]}>
-        <Input
-          placeholder="Buscar por número o huésped"
-          value={query}
-          onChangeText={setQuery}
-          autoCorrect={false}
-          style={{ paddingVertical: 10 }}
-        />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-          {STATUSES.map((st) => {
-            const active = status === st;
-            return (
-              <Pressable
-                key={st}
-                onPress={() => setStatus(active ? null : st)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                style={[g.chip, active && { borderColor: C.ink, backgroundColor: C.surface }]}
-              >
-                <View style={[g.dot, { backgroundColor: C.status[st].solid }]} />
-                <Text style={[g.chipText, active && { color: C.ink }]}>{STATUS_LABEL[st]}</Text>
-                <Text style={[g.chipCount, tabular]}>{counts[st]}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4 }}>
-          <Tab label="Todos" active={!block} onPress={() => setBlock(null)} />
-          {catalog.blocks.map((b) => (
-            <Tab key={b.id} label={b.name} active={block === b.id} onPress={() => setBlock(block === b.id ? null : b.id)} />
-          ))}
-        </ScrollView>
-      </View>
-
       {width > 0 && (
         <FlatList
           key={columns}
           data={filtered}
           numColumns={columns}
           keyExtractor={(r) => r.id}
-          contentContainerStyle={{ paddingHorizontal: pad, paddingBottom: 24, gap: GAP }}
+          ListHeaderComponent={header}
+          contentContainerStyle={{ paddingHorizontal: pad, paddingTop: 12, paddingBottom: 32, gap: GAP }}
           columnWrapperStyle={{ gap: GAP }}
           initialNumToRender={columns * 7}
           maxToRenderPerBatch={columns * 4}
           windowSize={7}
           removeClippedSubviews
           keyboardShouldPersistTaps="handled"
-          getItemLayout={(_, index) => {
-            const row = Math.floor(index / columns);
-            return { length: CARD_H + GAP, offset: (CARD_H + GAP) * row, index };
-          }}
+          keyboardDismissMode="on-drag"
           ListEmptyComponent={<Empty text={emptyText} />}
           renderItem={({ item }) => (
             <RoomCard
@@ -119,14 +130,54 @@ export default function RoomGrid({
           )}
         />
       )}
+
+      <Modal visible={filtersOpen} transparent animationType="fade" onRequestClose={() => setFiltersOpen(false)}>
+        <Pressable style={g.overlay} onPress={() => setFiltersOpen(false)}>
+          <Pressable style={g.sheet} onPress={() => {}}>
+            <Text style={g.sheetTitle}>Filtrar por estado</Text>
+            {STATUSES.map((st) => {
+              const active = status === st;
+              return (
+                <Pressable
+                  key={st}
+                  onPress={() => {
+                    setStatus(active ? null : st);
+                    setFiltersOpen(false);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  style={[g.option, active && { backgroundColor: C.bg }]}
+                >
+                  <View style={[g.swatch, { backgroundColor: C.status[st].tint, borderColor: C.status[st].solid }]} />
+                  <Text style={[g.optionText, active && { color: C.brand, fontWeight: '700' }]}>{STATUS_LABEL[st]}</Text>
+                  <Text style={[g.optionCount, tabular]}>{counts[st]}</Text>
+                </Pressable>
+              );
+            })}
+            <Btn
+              title="Ver todas"
+              variant="secondary"
+              onPress={() => {
+                setStatus(null);
+                setFiltersOpen(false);
+              }}
+              style={{ marginTop: 6 }}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
+}
+
+function Flag({ text, color }: { text: string; color: string }) {
+  return <Text style={[g.flag, { color }]}>{text}</Text>;
 }
 
 function Tab({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: active }} style={[g.tab, active && g.tabActive]}>
-      <Text style={[g.tabText, active && { color: C.ink, fontWeight: '600' }]}>{label}</Text>
+      <Text style={[g.tabText, active && { color: C.brand, fontWeight: '600' }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -155,50 +206,89 @@ export const RoomCard = memo(function RoomCard({
         {
           width,
           backgroundColor: c.tint,
-          borderColor: selected ? C.ink : c.border,
+          borderColor: selected ? C.brand : c.border,
           borderWidth: selected ? 1.5 : 1,
           opacity: pressed ? 0.75 : 1,
         },
       ]}
     >
-      {pending && (
-        <View style={g.pending}>
-          <CloudPending size={15} color={C.muted} />
+      <View style={g.topRow}>
+        <TypeBadge type={room.type} />
+        <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+          {room.has_novedad && <Flag text="Novedad" color={C.danger} />}
+          {room.needs_confirm && <Flag text="Confirmar" color={c.ink} />}
+          {pending && <CloudPending size={15} color={C.muted} />}
         </View>
-      )}
+      </View>
       <View style={g.numberRow}>
-        <DoorGlyph size={20} color={c.solid} fill={room.status === 'sin_revisar' ? undefined : c.border} />
+        <DoorGlyph size={20} color={c.solid} fill={room.status === 'surtida' ? undefined : c.border} />
         <Text style={[g.number, tabular]}>{room.number}</Text>
       </View>
       <Text style={[g.guest, !room.guest_name && { color: C.faint }]} numberOfLines={1}>
         {room.guest_name ?? 'Sin huésped'}
       </Text>
-      <Text style={g.flight} numberOfLines={1}>
-        Vuelo <Text style={[g.flightTime, tabular]}>{room.flight_time ?? '—'}</Text>
-      </Text>
+      {room.status === 'revisada' ? (
+        <Text style={[g.missing, { color: c.ink }]} numberOfLines={1}>
+          {room.units ? `Falta: ${missingText(room.missing)}` : 'Sin consumo'}
+        </Text>
+      ) : (
+        <Text style={g.flight} numberOfLines={1}>
+          Vuelo <Text style={[g.flightTime, tabular]}>{room.flight_time ?? '—'}</Text>
+        </Text>
+      )}
     </Pressable>
   );
 });
 
 const g = StyleSheet.create({
-  filters: { paddingTop: 12, paddingBottom: 12, gap: 10 },
-  chip: {
+  header: { gap: 10, marginBottom: 2 },
+  search: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 11,
-    height: 34,
-    borderRadius: 17,
+    gap: 8,
+    height: 44,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: C.surface,
     borderWidth: 1,
     borderColor: C.line,
-    backgroundColor: C.bg,
   },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  chipText: { fontSize: 13, fontWeight: '500', color: C.body },
-  chipCount: { fontSize: 13, fontWeight: '600', color: C.muted },
-  tab: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
-  tabActive: { backgroundColor: C.surface, borderWidth: 1, borderColor: C.line },
+  searchInput: { flex: 1, fontSize: 15, color: C.ink, paddingVertical: 0 },
+  iconBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tab: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: 'transparent' },
+  tabActive: { backgroundColor: C.surface, borderColor: C.brand },
   tabText: { fontSize: 13, color: C.muted, fontWeight: '500' },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  activeFilter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.line,
+  },
+  activeFilterText: { fontSize: 13, fontWeight: '600', color: C.body },
+  overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.4)', justifyContent: 'center', padding: 20 },
+  sheet: { backgroundColor: C.surface, borderRadius: 16, padding: 18, gap: 4, width: '100%', maxWidth: 400, alignSelf: 'center' },
+  sheetTitle: { fontSize: 17, fontWeight: '700', color: C.ink, marginBottom: 8 },
+  option: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 10, borderRadius: 10 },
+  swatch: { width: 18, height: 18, borderRadius: 5, borderWidth: 1.5 },
+  optionText: { flex: 1, fontSize: 15, color: C.ink },
+  optionCount: { fontSize: 15, fontWeight: '600', color: C.muted },
   card: {
     height: CARD_H,
     borderRadius: 12,
@@ -206,12 +296,14 @@ const g = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 3,
+    paddingTop: 18,
   },
-  pending: { position: 'absolute', top: 8, right: 8 },
+  topRow: { position: 'absolute', top: 8, left: 8, right: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  flag: { fontSize: 9, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
+  missing: { fontSize: 12, fontWeight: '600', maxWidth: '100%' },
   numberRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
   number: { fontSize: 26, fontWeight: '700', color: C.ink, letterSpacing: -0.5 },
   guest: { fontSize: 13, fontWeight: '500', color: C.body, maxWidth: '100%' },
   flight: { fontSize: 12, color: C.muted },
   flightTime: { fontWeight: '600', color: C.body },
 });
-

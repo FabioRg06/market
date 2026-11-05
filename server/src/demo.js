@@ -1,9 +1,10 @@
-// Datos de prueba: huéspedes con vuelo y revisiones de hoy y de ayer en varios estados.
-// Uso: npm run demo   (con el servidor apagado o encendido, da igual)
+// Datos de prueba para el flujo del día: tipos de habitación, salidas "por revisar"
+// (como si se hubiera cargado el Excel), revisadas con y sin consumo, novedades y surtidas.
+// Uso: npm run demo   (conviene después de `npm run reset`)
 import { randomUUID } from 'node:crypto';
 import { db, nextRev, transaction } from './db.js';
 import { ensureCatalog, catalog } from './seed.js';
-import { setGuest } from './reception.js';
+import { setGuest, setRoomType } from './reception.js';
 
 ensureCatalog();
 
@@ -11,50 +12,72 @@ const NAMES = ['Laura Gómez', 'Andrés Restrepo', 'Camila Ríos', 'John Miller'
   'Sofía Herrera', 'Mateo Vargas', 'Isabella Torres', 'Daniel Ortiz', 'Mariana López', 'Felipe Castro',
   'Emma Wilson', 'Juan Pablo Ruiz', 'Natalia Pérez', 'Carlos Duarte', 'Ana María Silva', 'Lucas Fernández'];
 const INSPECTORS = ['María', 'Yuliana', 'Sandra', 'Kelly'];
-const H = 3600e3;
+const TYPE_WEIGHTS = [['CM', 0.6], ['SS', 0.15], ['SM', 0.12], ['PR', 0.05], ['VIP', 0.08]];
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const pad = (n) => String(n).padStart(2, '0');
+const MIN = 60e3;
+
+function randomType() {
+  let r = Math.random();
+  for (const [t, w] of TYPE_WEIGHTS) if ((r -= w) <= 0) return t;
+  return 'CM';
+}
 
 const prices = Object.fromEntries(db.prepare(`SELECT id, price FROM products`).all().map((p) => [p.id, p.price]));
 const insertInsp = db.prepare(
-  `INSERT INTO inspections (id, room_id, inspector, device_id, started_at, finished_at, restocked_at, restocked_by, updated_at, rev)
-   VALUES (?, ?, ?, 'demo', ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO inspections (id, room_id, inspector, device_id, kind, started_at, finished_at, restocked_at, restocked_by, updated_at, rev)
+   VALUES (?, ?, ?, 'demo', ?, ?, ?, ?, ?, ?, ?)`
 );
 const insertItem = db.prepare(
   `INSERT INTO inspection_items (id, inspection_id, product_id, quantity, unit_price, updated_at, rev) VALUES (?, ?, ?, ?, ?, ?, ?)`
 );
 
-function inspection(roomId, startedAtRaw, { open = false, consumed = 0, restocked = false } = {}) {
+function inspection(roomId, type, startedAt, { kind = 'revision', consumed = 0, restockedAt = null } = {}) {
   const id = randomUUID();
-  const startedAt = Math.round(startedAtRaw);
-  const finished = open ? null : Math.round(startedAt + (4 + Math.random() * 8) * 60e3);
-  insertInsp.run(id, roomId, pick(INSPECTORS), startedAt, finished,
-    restocked ? finished + 30 * 60e3 : null, restocked ? pick(INSPECTORS) : null, Date.now(), nextRev());
-  const products = [...catalog.products].sort(() => Math.random() - 0.5).slice(0, consumed);
-  for (const p of products)
-    insertItem.run(`${id}:${p.id}`, id, p.id, 1 + (Math.random() < 0.3 ? 1 : 0), prices[p.id], Date.now(), nextRev());
+  const started = Math.round(startedAt);
+  const finished = Math.round(started + (3 + Math.random() * 9) * MIN + Math.random() * 59e3);
+  insertInsp.run(id, roomId, pick(INSPECTORS), kind, started, finished, restockedAt, restockedAt ? pick(INSPECTORS) : null, Date.now(), nextRev());
+  const available = Object.keys(catalog.typeInventory[type] ?? {});
+  for (const productId of available.sort(() => Math.random() - 0.5).slice(0, consumed))
+    insertItem.run(`${id}:${productId}`, id, productId, 1, prices[productId], Date.now(), nextRev());
+  return finished;
 }
 
 const today = new Date();
 today.setHours(0, 0, 0, 0);
 const t0 = today.getTime();
-const nowH = Math.max(1, (Date.now() - t0) / H);
+const now = Date.now();
+const elapsed = Math.max(60 * MIN, now - t0);
 
 transaction(() => {
-  const roomIds = db.prepare(`SELECT id FROM rooms ORDER BY CAST(number AS INTEGER)`).all().map((r) => r.id);
-  roomIds.forEach((roomId, i) => {
-    if (Math.random() < 0.55) {
-      const hour = 5 + Math.floor(Math.random() * 18);
-      setGuest(roomId, pick(NAMES), `${pad(hour)}:${pick(['00', '15', '30', '45'])}`);
-    }
-    if (i % 3 === 0) inspection(roomId, t0 - 24 * H + Math.random() * 10 * H, { consumed: i % 2 ? 2 : 0, restocked: true });
+  const rooms = db.prepare(`SELECT id FROM rooms ORDER BY CAST(number AS INTEGER)`).all();
+  for (const { id } of rooms) {
+    const type = randomType();
+    setRoomType(id, type);
+    if (Math.random() > 0.45) continue; // el resto queda surtida, como amanece el hotel
+    // Salida del día: llegó en el Excel → por revisar.
+    const hour = 5 + Math.floor(Math.random() * 18);
+    setGuest(id, { guest_name: pick(NAMES), flight_time: `${pad(hour)}:${pick(['00', '15', '30', '45'])}`, review: true });
+    // El Excel se "cargó" temprano; las revisiones vienen después.
+    const reviewAt = Math.round(now - elapsed * 0.8);
+    db.prepare(`UPDATE guests SET review_at = ? WHERE room_id = ?`).run(reviewAt, id);
     const roll = Math.random();
-    const at = t0 + Math.random() * nowH * 0.9 * H;
-    if (roll < 0.04) inspection(roomId, Date.now() - 5 * 60e3, { open: true });
-    else if (roll < 0.22) inspection(roomId, at, { consumed: 1 + Math.floor(Math.random() * 3) });
-    else if (roll < 0.36) inspection(roomId, at, { consumed: 2, restocked: true });
-    else if (roll < 0.5) inspection(roomId, at);
-  });
+    if (roll < 0.35) continue; // sigue por revisar
+    const start = reviewAt + Math.random() * Math.max(0, now - reviewAt - 60 * MIN);
+    if (roll < 0.6) {
+      inspection(id, type, start, { consumed: 1 + Math.floor(Math.random() * 3) }); // revisada, falta surtir
+    } else if (roll < 0.72) {
+      inspection(id, type, start, { consumed: 0 }); // sin consumo: falta confirmar
+    } else if (roll < 0.8) {
+      const end = inspection(id, type, start, { consumed: 0 });
+      inspection(id, type, end + 20 * MIN, { kind: 'novedad', consumed: 1 }); // novedad al confirmar
+    } else {
+      const end = inspection(id, type, start, { consumed: 1 + Math.floor(Math.random() * 2), restockedAt: null });
+      db.prepare(`UPDATE inspections SET restocked_at = ?, restocked_by = ? WHERE room_id = ? AND restocked_at IS NULL`).run(
+        Math.min(now, end + 25 * MIN), pick(INSPECTORS), id
+      ); // ya surtida
+    }
+  }
 });
 
-console.log('Datos de prueba cargados: huéspedes, vuelos y revisiones de hoy y ayer.');
+console.log('Datos de prueba cargados: tipos, salidas por revisar, revisadas, novedades y surtidas.');

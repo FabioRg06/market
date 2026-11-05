@@ -13,7 +13,8 @@ const PORT = Number(process.env.PORT ?? 4000);
 ensureCatalog();
 
 const app = express();
-app.use(express.json({ limit: '5mb' }));
+// Las fotos de productos y el Excel llegan en base64 dentro del JSON.
+app.use(express.json({ limit: '20mb' }));
 app.use((req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*');
   res.set('Access-Control-Allow-Headers', 'Content-Type');
@@ -33,15 +34,15 @@ function range(req) {
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, time: Date.now() }));
 
-// ---- Sincronización (teléfonos) ----
+// ---- Sincronización (tablets) ----
 app.post('/api/sync', (req, res) => {
   const { deviceId, since = 0, changes } = req.body ?? {};
   applyPush(changes, deviceId);
   res.json(pullSince(Number(since)));
 });
 
-// ---- Recepción ----
-app.get('/api/rooms', (req, res) => res.json(reception.listRooms(range(req))));
+// ---- Habitaciones ----
+app.get('/api/rooms', (_req, res) => res.json(reception.listRooms()));
 
 app.get('/api/rooms/:id', (req, res) => {
   const detail = reception.roomDetail(req.params.id);
@@ -49,26 +50,69 @@ app.get('/api/rooms/:id', (req, res) => {
   res.json(detail);
 });
 
-app.get('/api/day', (req, res) => res.json(reception.daySummary(range(req))));
-
-app.post('/api/inspections/:id/restock', (req, res) => {
-  const ok = reception.markRestocked(req.params.id, req.body?.by);
-  res.json({ ok });
+app.post('/api/rooms/:id/restock', (req, res) => {
+  res.json({ ok: reception.restockRoom(req.params.id, req.body?.by) });
 });
 
 app.put('/api/rooms/:id/guest', (req, res) => {
-  reception.setGuest(req.params.id, req.body?.guest_name, req.body?.flight_time);
+  reception.setGuest(req.params.id, req.body ?? {});
   res.json({ ok: true });
 });
 
-// ---- Productos (lista fija: solo se ajusta precio y cantidad estándar) ----
+app.put('/api/rooms/:id/type', (req, res) => {
+  res.json({ ok: reception.setRoomType(req.params.id, req.body?.type) });
+});
+
+// ---- Excel de salidas: marca las habitaciones "por revisar" ----
+app.post('/api/import', (req, res) => {
+  try {
+    const buffer = Buffer.from(String(req.body?.file ?? ''), 'base64');
+    if (!buffer.length) return res.status(400).json({ ok: false, error: 'No llegó ningún archivo.' });
+    res.json(reception.importSheet(buffer));
+  } catch (e) {
+    res.status(400).json({ ok: false, error: 'No se pudo leer el archivo. Usa un Excel (.xlsx) o CSV.' });
+  }
+});
+
+// ---- Reporte del día ----
+app.get('/api/report', (req, res) => res.json(reception.dayReport(range(req))));
+
+app.get('/api/report.csv', (req, res) => {
+  const { from } = range(req);
+  const d = new Date(from);
+  const name = `reporte-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.csv`;
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', `attachment; filename="${name}"`);
+  res.send(reception.dayReportCsv(range(req)));
+});
+
+// ---- Inventario global y por tipo ----
 app.get('/api/products', (_req, res) => res.json(reception.products()));
+
+app.post('/api/products', (req, res) => {
+  const name = String(req.body?.name ?? '').trim();
+  if (!name) return res.status(400).json({ error: 'Falta el nombre' });
+  res.json({ id: reception.createProduct(name, Number(req.body?.price ?? 0)) });
+});
 
 app.put('/api/products/:id', (req, res) => {
   res.json({ ok: reception.updateProduct(req.params.id, req.body ?? {}) });
 });
 
-// ---- Vista web de recepción (build de la app con `npm run build:web`) ----
+app.get('/api/type-inventory', (_req, res) => res.json(reception.typeInventory()));
+
+app.put('/api/type-inventory/:type', (req, res) => {
+  res.json({ ok: reception.setTypeInventory(req.params.type, req.body?.items ?? []) });
+});
+
+// ---- Bloques ----
+app.get('/api/blocks', (_req, res) => res.json(reception.blocks()));
+
+app.put('/api/blocks/:id', (req, res) => {
+  res.json({ ok: reception.updateBlock(req.params.id, req.body ?? {}) });
+});
+
+// ---- Vista web (build de la app con `npm run build:web`) ----
 const webDir = path.join(__dirname, '..', '..', 'app', 'dist');
 if (fs.existsSync(webDir)) {
   app.use(express.static(webDir));
@@ -81,7 +125,7 @@ app.listen(PORT, '0.0.0.0', () => {
   for (const nets of Object.values(os.networkInterfaces()))
     for (const n of nets ?? [])
       if (n.family === 'IPv4' && !n.internal)
-        console.log(`  Para los teléfonos:  http://${n.address}:${PORT}`);
+        console.log(`  Para las tablets:    http://${n.address}:${PORT}`);
   if (!fs.existsSync(webDir))
     console.log('\n  (La vista web aún no está compilada: en /app ejecuta `npm run build:web`)');
 });
