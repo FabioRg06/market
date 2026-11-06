@@ -1,5 +1,5 @@
-// Reporte del día: revisadas, sin revisar, surtidas y lo que falta surtir. Se descarga en CSV
-// (abre en Excel).
+// Reporte del día: revisadas, sin revisar, surtidas y lo que falta surtir. Se descarga en PDF
+// (y también en CSV, que abre en Excel).
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { api } from '../../api';
@@ -40,7 +40,7 @@ export default function ReportPanel({ onOpenRoom }: { onOpenRoom: (roomId: strin
 
   async function download() {
     const { serverUrl } = await getSettings();
-    openUrl(`${serverUrl}/api/report.csv?from=${from}&to=${to}`);
+    openUrl(`${serverUrl}/api/report.pdf?from=${from}&to=${to}`);
   }
 
   return (
@@ -50,7 +50,13 @@ export default function ReportPanel({ onOpenRoom }: { onOpenRoom: (roomId: strin
         <Text style={{ fontSize: 17, fontWeight: '700', color: C.ink, minWidth: 110, textAlign: 'center' }}>{dayLabel(day)}</Text>
         <Btn title="›" variant="secondary" disabled={isToday} onPress={() => setDay(Math.min(Date.now(), day + DAY))} style={{ minHeight: 40, paddingHorizontal: 14 }} />
         <View style={{ flex: 1 }} />
-        <Btn title="Descargar reporte (Excel)" onPress={download} style={{ minHeight: 40 }} />
+        <Btn title="Descargar PDF" onPress={download} style={{ minHeight: 40 }} />
+        <Btn
+          title="Excel"
+          variant="secondary"
+          onPress={async () => openUrl(`${(await getSettings()).serverUrl}/api/report.csv?from=${from}&to=${to}`)}
+          style={{ minHeight: 40 }}
+        />
       </View>
 
       {error && <Text style={{ color: C.danger }}>No se pudo cargar el reporte ({error}).</Text>}

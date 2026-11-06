@@ -212,10 +212,10 @@ export const RoomCard = memo(function RoomCard({
         },
       ]}
     >
+      {room.has_novedad && <View style={g.notif} accessibilityLabel="Tiene novedad" />}
       <View style={g.topRow}>
         <TypeBadge type={room.type} />
         <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
-          {room.has_novedad && <Flag text="Novedad" color={C.danger} />}
           {room.needs_confirm && <Flag text="Confirmar" color={c.ink} />}
           {pending && <CloudPending size={15} color={C.muted} />}
         </View>
@@ -228,7 +228,7 @@ export const RoomCard = memo(function RoomCard({
         {room.guest_name ?? 'Sin huésped'}
       </Text>
       {room.status === 'revisada' ? (
-        <Text style={[g.missing, { color: c.ink }]} numberOfLines={1}>
+        <Text style={[g.missing, { color: room.units ? C.danger : c.ink }]} numberOfLines={1}>
           {room.units ? `Falta: ${missingText(room.missing)}` : 'Sin consumo'}
         </Text>
       ) : (
@@ -299,6 +299,19 @@ const g = StyleSheet.create({
     paddingTop: 18,
   },
   topRow: { position: 'absolute', top: 8, left: 8, right: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  // Punto rojo tipo notificación para las novedades.
+  notif: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: C.danger,
+    borderWidth: 2,
+    borderColor: C.surface,
+    zIndex: 2,
+  },
   flag: { fontSize: 9, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
   missing: { fontSize: 12, fontWeight: '600', maxWidth: '100%' },
   numberRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },

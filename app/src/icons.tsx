@@ -66,6 +66,23 @@ export function GearGlyph({ size = 22, color = '#334155' }: IconProps) {
   );
 }
 
+export function PencilGlyph({ size = 20, color = '#334155' }: IconProps) {
+  return (
+    <Base size={size} color={color} strokeWidth={3.5}>
+      <Path d="M30 8l10 10L18 40H8V30z" />
+      <Path d="M25 13l10 10" />
+    </Base>
+  );
+}
+
+export function ChevronGlyph({ size = 16, color = '#94A3B8', open }: IconProps & { open?: boolean }) {
+  return (
+    <Base size={size} color={color} strokeWidth={4}>
+      <Path d={open ? 'M12 18l12 12 12-12' : 'M18 12l12 12-12 12'} />
+    </Base>
+  );
+}
+
 export function FilterGlyph({ size = 20, color = '#334155' }: IconProps) {
   return (
     <Base size={size} color={color} strokeWidth={3.5}>

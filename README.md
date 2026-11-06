@@ -90,6 +90,14 @@ npm run demo
 npm run reset
 ```
 
+Dejar el hotel como al empezar el día (todo surtido y algunas habitaciones por revisar al azar, sin borrar el historial):
+
+```bash
+npm run inicio-dia
+```
+
+Las fotos de los productos se guardan en la base (`server/data/market.db`), no en el repositorio: en una instalación nueva se suben desde Recepción → *Inventario*.
+
 ### 2. Vista de recepción
 
 ```bash

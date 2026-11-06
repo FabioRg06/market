@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { api } from '../../api';
 import type { RoomRow } from '../../types';
-import { money } from '../../format';
+import { dayRange, money } from '../../format';
 import RoomGrid from '../../RoomGrid';
 import { GearGlyph } from '../../icons';
 import { Btn, C, Confirm, Drawer, Header, Screen, s, tabular } from '../../ui';
@@ -25,6 +25,7 @@ interface ImportResult {
 export default function ReceptionHome({ onSettings }: { onSettings: () => void }) {
   const [tab, setTab] = useState<Tab>('habitaciones');
   const [rooms, setRooms] = useState<RoomRow[]>([]);
+  const [todayTotal, setTodayTotal] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -33,7 +34,13 @@ export default function ReceptionHome({ onSettings }: { onSettings: () => void }
 
   const load = useCallback(async () => {
     try {
-      setRooms(await api.get<RoomRow[]>('/api/rooms'));
+      const { from, to } = dayRange(Date.now());
+      const [list, rep] = await Promise.all([
+        api.get<RoomRow[]>('/api/rooms'),
+        api.get<{ counts: { total: number } }>(`/api/report?from=${from}&to=${to}`),
+      ]);
+      setRooms(list);
+      setTodayTotal(rep.counts.total);
       setError(null);
       setTick((t) => t + 1);
     } catch (e: any) {
@@ -66,7 +73,6 @@ export default function ReceptionHome({ onSettings }: { onSettings: () => void }
 
   const count = (st: RoomRow['status']) => rooms.filter((r) => r.status === st).length;
   const novedades = rooms.filter((r) => r.has_novedad).length;
-  const pendingTotal = rooms.reduce((t, r) => t + (r.status === 'revisada' ? r.total : 0), 0);
 
   return (
     <Screen>
@@ -129,7 +135,7 @@ export default function ReceptionHome({ onSettings }: { onSettings: () => void }
             <Stat label="Revisadas · falta surtir" value={String(count('revisada'))} color={C.status.revisada.solid} />
             <Stat label="Novedades" value={String(novedades)} color={C.danger} />
             <Stat label="Surtidas" value={String(count('surtida'))} color={C.status.surtida.solid} />
-            <Stat label="Por cobrar / reponer" value={money(pendingTotal)} />
+            <Stat label="Consumo de minibar hoy" value={money(todayTotal)} />
           </ScrollView>
           <RoomGrid rooms={rooms} onPress={select} selectedId={selected} emptyText={error ? 'Sin datos del servidor.' : undefined} />
         </>

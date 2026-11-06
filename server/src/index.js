@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { applyPush, pullSince } from './sync.js';
 import * as reception from './reception.js';
 import { ensureCatalog } from './seed.js';
+import { writeDayReportPdf } from './reportPdf.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 4000);
@@ -54,6 +55,10 @@ app.post('/api/rooms/:id/restock', (req, res) => {
   res.json({ ok: reception.restockRoom(req.params.id, req.body?.by) });
 });
 
+app.put('/api/inspections/:id/items', (req, res) => {
+  res.json({ ok: reception.setInspectionItems(req.params.id, req.body?.items ?? []) });
+});
+
 app.put('/api/rooms/:id/guest', (req, res) => {
   reception.setGuest(req.params.id, req.body ?? {});
   res.json({ ok: true });
@@ -76,6 +81,15 @@ app.post('/api/import', (req, res) => {
 
 // ---- Reporte del día ----
 app.get('/api/report', (req, res) => res.json(reception.dayReport(range(req))));
+
+app.get('/api/report.pdf', (req, res) => {
+  const { from } = range(req);
+  const d = new Date(from);
+  const name = `reporte-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.pdf`;
+  res.set('Content-Type', 'application/pdf');
+  res.set('Content-Disposition', `inline; filename="${name}"`);
+  writeDayReportPdf(range(req), res);
+});
 
 app.get('/api/report.csv', (req, res) => {
   const { from } = range(req);

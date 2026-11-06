@@ -100,7 +100,7 @@ export default function InventoryPanel() {
                 disabled={!canPickFiles}
                 accessibilityRole="button"
                 accessibilityLabel={`Subir foto de ${p.name}`}
-                style={{ width: 52, height: 52, borderRadius: 10, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }}
+                style={{ width: 52, height: 52, borderRadius: 10, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: C.line, alignItems: 'center', justifyContent: 'center' }}
               >
                 <ProductPicture id={p.id} image={p.image} size={34} />
               </Pressable>

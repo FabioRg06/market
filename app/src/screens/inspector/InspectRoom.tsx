@@ -89,7 +89,7 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
     <Screen>
       <View style={[st.head, { paddingHorizontal: pad }]}>
         <Text style={[st.number, tabular]}>{room.number}</Text>
-        <TypeBadge type={room.type} size="md" />
+        <TypeBadge type={room.type} size="md" color={C.onBrandMuted} />
         <View style={{ flex: 1 }}>
           {insp.kind !== 'revision' && <Text style={st.kind}>{KIND_LABEL[insp.kind]}</Text>}
           <Text style={st.guest} numberOfLines={1}>
@@ -125,7 +125,7 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
               ]}
             >
               <View style={[st.imageBox, phone && { height: 96 }]}>
-                <ProductPicture id={l.product_id} image={l.image} size={phone ? 68 : 84} color={q > 0 ? C.ink : C.body} />
+                <ProductPicture id={l.product_id} image={l.image} size={phone ? 68 : 84} color={q > 0 ? C.ink : C.body} fill shrink={/pequeñ/i.test(l.name) ? 0.62 : 1} />
               </View>
               <Text style={st.name} numberOfLines={2}>
                 {l.name}
@@ -252,7 +252,11 @@ const st = StyleSheet.create({
   imageBox: {
     height: 116,
     borderRadius: 10,
-    backgroundColor: C.bg,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: C.line,
+    padding: 6,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,

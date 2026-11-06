@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { LineItem, RoomStatus, RoomType } from './types';
 import { money, TYPE_BY_CODE } from './format';
 import { ProductImage } from './icons';
+import Svg, { Path } from 'react-native-svg';
 
 export const C = {
   bg: '#EDF1FA',
@@ -35,13 +36,11 @@ export const C = {
   line: '#DCE3F1',
   primary: '#1E40AF',
   danger: '#B42318',
-  // Los colores verde/amarillo/naranja/rojo son de los tipos de habitación (SS, SM, CM, PR),
-  // así que los estados usan otra gama para no confundirse.
   status: {
     surtida: { tint: '#FFFFFF', border: '#DCE3F1', solid: '#94A3B8', ink: '#475569' },
-    por_revisar: { tint: '#EAF0FF', border: '#9DB4F2', solid: '#2F57D6', ink: '#1E3A9C' },
-    en_revision: { tint: '#E6F7FA', border: '#8ED3E0', solid: '#0E8FA8', ink: '#0B6577' },
-    revisada: { tint: '#F3EEFF', border: '#C9B6F5', solid: '#7247D6', ink: '#4F2CA3' },
+    por_revisar: { tint: '#FFF8E1', border: '#F0D27A', solid: '#E0A800', ink: '#7A5A00' },
+    en_revision: { tint: '#EAF0FF', border: '#9DB4F2', solid: '#2F57D6', ink: '#1E3A9C' },
+    revisada: { tint: '#E9F7EF', border: '#A8DDBE', solid: '#2E9E5B', ink: '#1B6B3E' },
   } as Record<RoomStatus, { tint: string; border: string; solid: string; ink: string }>,
 };
 
@@ -201,23 +200,46 @@ export function Confirm({
   );
 }
 
-/** Etiqueta del tipo de habitación con su color (SS amarillo, SM naranja, CM verde, PR rojo, VIP). */
-export function TypeBadge({ type, size = 'sm' }: { type: RoomType; size?: 'sm' | 'md' }) {
+/** Código del tipo de habitación (CM, SS, SM, PR, VIP), solo en texto. */
+export function TypeBadge({ type, size = 'sm', color = C.muted }: { type: RoomType; size?: 'sm' | 'md'; color?: string }) {
   const t = TYPE_BY_CODE[type] ?? TYPE_BY_CODE.CM;
-  const md = size === 'md';
   return (
-    <View
-      accessibilityLabel={`Tipo ${t.name}`}
-      style={{ backgroundColor: t.color, borderRadius: 6, paddingHorizontal: md ? 8 : 5, paddingVertical: md ? 3 : 1 }}
-    >
-      <Text style={{ color: t.ink, fontSize: md ? 12 : 10, fontWeight: '800', letterSpacing: 0.4 }}>{t.code}</Text>
-    </View>
+    <Text accessibilityLabel={`Tipo ${t.name}`} style={{ color, fontSize: size === 'md' ? 13 : 11, fontWeight: '800', letterSpacing: 0.6 }}>
+      {t.code}
+    </Text>
   );
 }
 
 /** Foto real del producto si recepción la subió; si no, la ilustración. */
-export function ProductPicture({ id, image, size, color }: { id: string; image?: string | null; size: number; color?: string }) {
-  if (image) return <Image source={{ uri: image }} style={{ width: size * 1.4, height: size * 1.4, borderRadius: 8 }} resizeMode="contain" />;
+export function ProductPicture({
+  id,
+  image,
+  size,
+  color,
+  fill,
+  shrink = 1,
+}: {
+  id: string;
+  image?: string | null;
+  size: number;
+  color?: string;
+  /** La foto ocupa todo el recuadro que la contiene. */
+  fill?: boolean;
+  /** Para mostrar más chica la presentación pequeña cuando usa la misma foto. */
+  shrink?: number;
+}) {
+  if (image)
+    return (
+      <Image
+        source={{ uri: image }}
+        style={
+          fill
+            ? { width: `${shrink * 100}%`, height: `${shrink * 100}%` }
+            : { width: size * 1.4 * shrink, height: size * 1.4 * shrink, borderRadius: 8 }
+        }
+        resizeMode="contain"
+      />
+    );
   return <ProductImage id={id} size={size} color={color} />;
 }
 
@@ -274,6 +296,7 @@ export function Receipt({
 }) {
   const total = lines.reduce((t, l) => t + l.quantity * l.unit_price, 0);
   return (
+    <View>
     <View style={s.receipt}>
       <View style={{ gap: 2 }}>
         <Text style={s.receiptTitle}>{title}</Text>
@@ -300,6 +323,27 @@ export function Receipt({
         <Text style={[s.receiptTotal, tabular]}>{money(total)}</Text>
       </View>
       {footer}
+    </View>
+    <ZigzagEdge />
+    </View>
+  );
+}
+
+/** Borde de abajo en triángulos, como un recibo cortado. */
+function ZigzagEdge({ tooth = 12, height = 8 }: { tooth?: number; height?: number }) {
+  const [w, setW] = React.useState(0);
+  const n = Math.max(1, Math.floor(w / tooth));
+  const step = w / n;
+  let d = `M0 0`;
+  for (let i = 0; i < n; i++) d += ` L${(i + 0.5) * step} ${height} L${(i + 1) * step} 0`;
+  return (
+    <View onLayout={(e) => setW(e.nativeEvent.layout.width)} style={{ height, marginTop: -1 }}>
+      {w > 0 && (
+        <Svg width={w} height={height}>
+          <Path d={`${d} Z`} fill={C.surface} />
+          <Path d={d} fill="none" stroke={C.line} strokeWidth={1} />
+        </Svg>
+      )}
     </View>
   );
 }
@@ -369,10 +413,13 @@ export const s = StyleSheet.create({
   dialogRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
   receipt: {
     backgroundColor: C.surface,
-    borderRadius: 12,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
     padding: 16,
+    paddingBottom: 12,
     gap: 8,
     borderWidth: 1,
+    borderBottomWidth: 0,
     borderColor: C.line,
   },
   receiptTitle: { fontSize: 15, fontWeight: '700', color: C.ink },

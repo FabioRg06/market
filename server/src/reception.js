@@ -143,6 +143,27 @@ export function restockRoom(roomId, by) {
   return res.changes > 0;
 }
 
+/** Recepción corrige lo consumido en una revisión que aún no se ha surtido (modo edición). */
+export function setInspectionItems(inspectionId, items) {
+  const insp = db.prepare(`SELECT * FROM inspections WHERE id = ?`).get(inspectionId);
+  if (!insp || insp.restocked_at) return false;
+  const price = db.prepare(`SELECT price FROM products WHERE id = ?`);
+  const upsert = db.prepare(
+    `INSERT INTO inspection_items (id, inspection_id, product_id, quantity, unit_price, updated_at, rev) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET quantity = excluded.quantity, updated_at = excluded.updated_at, rev = excluded.rev`
+  );
+  transaction(() => {
+    const now = Date.now();
+    for (const it of items) {
+      const p = price.get(it.product_id);
+      if (!p) continue;
+      upsert.run(`${inspectionId}:${it.product_id}`, inspectionId, it.product_id, Math.max(0, it.quantity | 0), p.price, now, nextRev());
+    }
+    db.prepare(`UPDATE inspections SET updated_at = ?, rev = ? WHERE id = ?`).run(now, nextRev(), inspectionId);
+  });
+  return true;
+}
+
 /** Huésped, vuelo y (opcional) marcar "por revisar". Vacío = habitación libre. */
 export function setGuest(roomId, { guest_name, flight_time, review }) {
   const cur = db.prepare(`SELECT review_at FROM guests WHERE room_id = ?`).get(roomId);
