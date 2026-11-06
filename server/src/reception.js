@@ -428,11 +428,24 @@ export function analytics({ from, to }) {
   const days = [];
   for (let d = from; d < to; d += DAY) {
     const list = inspections.filter((i) => i.finished_at >= d && i.finished_at < d + DAY);
-    days.push({ day: d, total: list.reduce((s, i) => s + i.total, 0), revisiones: list.filter((i) => i.kind !== 'confirmacion').length });
+    days.push({ day: d, total: list.reduce((s, i) => s + i.total, 0), units: list.reduce((s, i) => s + i.units, 0), revisiones: list.filter((i) => i.kind !== 'confirmacion').length });
   }
 
+  // Mapa de calor: día de la semana (lunes = 0) × hora.
+  const heat = Array.from({ length: 7 }, () => Array(24).fill(0));
+  for (const i of work) {
+    const d = new Date(i.finished_at);
+    heat[(d.getDay() + 6) % 7][d.getHours()]++;
+  }
+  const kinds = { revision: 0, consumo: 0, novedad: 0, confirmacion: 0 };
+  for (const i of inspections) kinds[i.kind] = (kinds[i.kind] ?? 0) + 1;
+  const withConsumption = work.filter((i) => i.units > 0);
+
   return {
+    heat,
+    kinds,
     kpis: {
+      ticket: withConsumption.length ? Math.round(withConsumption.reduce((t, i) => t + i.total, 0) / withConsumption.length) : 0,
       revisiones: work.length,
       habitaciones: new Set(work.map((i) => i.room_id)).size,
       tiempo_medio: avg(durations),
