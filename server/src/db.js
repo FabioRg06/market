@@ -124,6 +124,7 @@ addColumn('rooms', 'type', "TEXT NOT NULL DEFAULT 'CM'");
 addColumn('products', 'image', 'TEXT');
 addColumn('guests', 'review_at', 'INTEGER');
 addColumn('inspections', 'kind', "TEXT NOT NULL DEFAULT 'revision'");
+addColumn('rooms', 'sort', 'INTEGER NOT NULL DEFAULT 0');
 
 export function nextRev() {
   const row = db.prepare(`SELECT value FROM meta WHERE key = 'rev'`).get();

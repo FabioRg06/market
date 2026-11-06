@@ -16,6 +16,7 @@ import type {
 import { roomState } from '../format';
 import { uuid } from '../uuid';
 import catalog from '../catalog.json';
+import { CATALOG_ROOMS } from '../rooms';
 
 const db = SQLite.openDatabaseSync('market.db');
 
@@ -87,6 +88,7 @@ const migrated = [
   addColumn('products', 'image', 'TEXT'),
   addColumn('guests', 'review_at', 'INTEGER'),
   addColumn('inspections', 'kind', "TEXT NOT NULL DEFAULT 'revision'"),
+  addColumn('rooms', 'sort', 'INTEGER NOT NULL DEFAULT 0'),
 ].some(Boolean);
 // Con columnas nuevas se vuelve a descargar todo del servidor para llenarlas.
 if (migrated) db.runSync(`DELETE FROM meta WHERE key = 'last_rev'`);
@@ -97,8 +99,15 @@ db.withTransactionSync(() => {
   for (const b of catalog.blocks) {
     db.runSync(`INSERT OR IGNORE INTO blocks (id, name, code, updated_at) VALUES (?, ?, ?, 0)`, b.id, b.name, b.code);
     db.runSync(`UPDATE blocks SET code = ? WHERE id = ? AND code IS NULL`, b.code, b.id);
-    for (let n = b.from; n <= b.to; n++)
-      db.runSync(`INSERT OR IGNORE INTO rooms (id, block_id, number, updated_at) VALUES (?, ?, ?, 0)`, `r${n}`, b.id, String(n));
+  }
+  // Habitaciones reales del hotel; las que ya no están en el catálogo se desactivan.
+  db.runSync(`UPDATE rooms SET active = 0`);
+  for (const r of CATALOG_ROOMS) {
+    db.runSync(
+      `INSERT OR IGNORE INTO rooms (id, block_id, number, type, sort, updated_at) VALUES (?, ?, ?, ?, ?, 0)`,
+      r.id, r.block_id, r.number, r.type, r.sort
+    );
+    db.runSync(`UPDATE rooms SET block_id = ?, number = ?, sort = ?, active = 1 WHERE id = ?`, r.block_id, r.number, r.sort, r.id);
   }
   for (const p of catalog.products)
     db.runSync(`INSERT OR IGNORE INTO products (id, name, price, sort, updated_at) VALUES (?, ?, ?, ?, 0)`, p.id, p.name, p.price, p.sort);
@@ -193,7 +202,7 @@ function statesFor(rooms: RoomBase[], roomId?: string): RoomRow[] {
 
 /** Las 700 habitaciones con huésped, tipo y estado. Se filtra en memoria (es rápido). */
 export function listRooms(): RoomRow[] {
-  return statesFor(db.getAllSync<RoomBase>(`${roomSql} WHERE r.active = 1 ORDER BY CAST(r.number AS INTEGER)`));
+  return statesFor(db.getAllSync<RoomBase>(`${roomSql} WHERE r.active = 1 ORDER BY r.sort`));
 }
 
 export function getRoom(roomId: string): RoomRow | null {
@@ -384,10 +393,10 @@ export function applyPull(data: SyncPayload) {
       );
     for (const r of data.rooms)
       db.runSync(
-        `INSERT INTO rooms (id, block_id, number, type, active, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO rooms (id, block_id, number, type, sort, active, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET block_id = excluded.block_id, number = excluded.number, type = excluded.type,
-           active = excluded.active, updated_at = excluded.updated_at`,
-        r.id, r.block_id, r.number, r.type ?? catalog.defaultType, r.active, r.updated_at
+           sort = excluded.sort, active = excluded.active, updated_at = excluded.updated_at`,
+        r.id, r.block_id, r.number, r.type ?? catalog.defaultType, r.sort ?? 0, r.active, r.updated_at
       );
     for (const p of data.products)
       db.runSync(

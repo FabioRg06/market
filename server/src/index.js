@@ -82,6 +82,8 @@ app.post('/api/import', (req, res) => {
 // ---- Reporte del día ----
 app.get('/api/report', (req, res) => res.json(reception.dayReport(range(req))));
 
+app.get('/api/analytics', (req, res) => res.json(reception.analytics(range(req))));
+
 app.get('/api/report.pdf', (req, res) => {
   const { from } = range(req);
   const d = new Date(from);

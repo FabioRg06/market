@@ -1,18 +1,28 @@
 // Búsqueda, filtros y cuadrícula de habitaciones. Lo usan las dos vistas.
 // La búsqueda y los bloques van dentro de la lista: al bajar se esconden y las habitaciones
 // ocupan toda la pantalla; al volver arriba aparecen. Los estados van en el botón de filtros.
-// Pensado para 700 tarjetas: altura fija, filtros en memoria y solo se dibuja lo visible.
+// Pensado para cientos de tarjetas: altura fija, filtros en memoria y solo se dibuja lo visible.
 import React, { memo, useCallback, useMemo, useState } from 'react';
 import { FlatList, LayoutChangeEvent, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { RoomRow, RoomStatus } from './types';
-import { missingText, STATUS_LABEL } from './format';
+import { STATUS_LABEL } from './format';
 import { Btn, C, Empty, s, tabular, TypeBadge } from './ui';
 import { CloudPending, DoorGlyph, FilterGlyph, SearchGlyph } from './icons';
 import catalog from './catalog.json';
 
-const CARD_H = 132;
+const CARD_H = 118;
 const GAP = 10;
 const STATUSES: RoomStatus[] = ['por_revisar', 'en_revision', 'revisada', 'surtida'];
+
+/** Filtros: los cuatro estados más dos marcas de las revisadas. */
+type Filter = RoomStatus | 'por_confirmar' | 'novedad';
+const FILTERS: { key: Filter; label: string; color: string; ring: string }[] = [
+  ...STATUSES.map((st) => ({ key: st as Filter, label: STATUS_LABEL[st], color: C.status[st].tint, ring: C.status[st].solid })),
+  { key: 'por_confirmar', label: 'Por confirmar', color: C.status.revisada.tint, ring: C.status.revisada.ink },
+  { key: 'novedad', label: 'Con novedad', color: '#FDECEC', ring: C.danger },
+];
+const matches = (r: RoomRow, f: Filter) =>
+  f === 'por_confirmar' ? r.needs_confirm : f === 'novedad' ? r.has_novedad : r.status === f;
 const NO_PENDING = new Set<string>();
 
 export default function RoomGrid({
@@ -33,23 +43,30 @@ export default function RoomGrid({
 }) {
   const [width, setWidth] = useState(0);
   const [query, setQuery] = useState('');
-  const [status, setStatus] = useState<RoomStatus | null>(null);
+  const [status, setStatus] = useState<Filter | null>(null);
   const [block, setBlock] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const counts = useMemo(() => {
-    const c: Record<RoomStatus, number> = { surtida: 0, por_revisar: 0, en_revision: 0, revisada: 0 };
-    for (const r of rooms) if (!block || r.block_id === block) c[r.status]++;
+    const c = Object.fromEntries(FILTERS.map((x) => [x.key, 0])) as Record<Filter, number>;
+    for (const r of rooms) if (!block || r.block_id === block) for (const x of FILTERS) if (matches(r, x.key)) c[x.key]++;
     return c;
   }, [rooms, block]);
+
+  // Recepción puede renombrar el código de un bloque: se toma el que llega con las habitaciones.
+  const blockCodes = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of rooms) if (r.block_code && !m.has(r.block_id)) m.set(r.block_id, r.block_code);
+    return m;
+  }, [rooms]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rooms.filter(
       (r) =>
-        (!status || r.status === status) &&
+        (!status || matches(r, status)) &&
         (!block || r.block_id === block) &&
-        (!q || r.number.startsWith(q) || (r.guest_name ?? '').toLowerCase().includes(q))
+        (!q || r.number.toLowerCase().includes(q.replace(/\s/g, '')) || (r.guest_name ?? '').toLowerCase().includes(q))
     );
   }, [rooms, query, status, block]);
 
@@ -88,13 +105,13 @@ export default function RoomGrid({
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
         <Tab label="Todos" active={!block} onPress={() => setBlock(null)} />
         {catalog.blocks.map((b) => (
-          <Tab key={b.id} label={rooms.find((r) => r.block_id === b.id)?.block_code ?? b.code} active={block === b.id} onPress={() => setBlock(block === b.id ? null : b.id)} />
+          <Tab key={b.id} label={blockCodes.get(b.id) ?? b.code} active={block === b.id} onPress={() => setBlock(block === b.id ? null : b.id)} />
         ))}
       </ScrollView>
       {status && (
         <Pressable onPress={() => setStatus(null)} style={g.activeFilter} accessibilityRole="button" accessibilityLabel="Quitar filtro">
-          <View style={[g.dot, { backgroundColor: C.status[status].solid }]} />
-          <Text style={g.activeFilterText}>{STATUS_LABEL[status]}</Text>
+          <View style={[g.dot, { backgroundColor: FILTERS.find((x) => x.key === status)!.ring }]} />
+          <Text style={g.activeFilterText}>{FILTERS.find((x) => x.key === status)!.label}</Text>
           <Text style={[g.activeFilterText, { color: C.muted }]}>✕</Text>
         </Pressable>
       )}
@@ -134,23 +151,23 @@ export default function RoomGrid({
       <Modal visible={filtersOpen} transparent animationType="fade" onRequestClose={() => setFiltersOpen(false)}>
         <Pressable style={g.overlay} onPress={() => setFiltersOpen(false)}>
           <Pressable style={g.sheet} onPress={() => {}}>
-            <Text style={g.sheetTitle}>Filtrar por estado</Text>
-            {STATUSES.map((st) => {
-              const active = status === st;
+            <Text style={g.sheetTitle}>Filtrar</Text>
+            {FILTERS.map((x, i) => {
+              const active = status === x.key;
               return (
                 <Pressable
-                  key={st}
+                  key={x.key}
                   onPress={() => {
-                    setStatus(active ? null : st);
+                    setStatus(active ? null : x.key);
                     setFiltersOpen(false);
                   }}
                   accessibilityRole="button"
                   accessibilityState={{ selected: active }}
-                  style={[g.option, active && { backgroundColor: C.bg }]}
+                  style={[g.option, active && { backgroundColor: C.bg }, i === STATUSES.length && g.optionSep]}
                 >
-                  <View style={[g.swatch, { backgroundColor: C.status[st].tint, borderColor: C.status[st].solid }]} />
-                  <Text style={[g.optionText, active && { color: C.brand, fontWeight: '700' }]}>{STATUS_LABEL[st]}</Text>
-                  <Text style={[g.optionCount, tabular]}>{counts[st]}</Text>
+                  <View style={[g.swatch, { backgroundColor: x.color, borderColor: x.ring }]} />
+                  <Text style={[g.optionText, active && { color: C.brand, fontWeight: '700' }]}>{x.label}</Text>
+                  <Text style={[g.optionCount, tabular]}>{counts[x.key]}</Text>
                 </Pressable>
               );
             })}
@@ -227,15 +244,9 @@ export const RoomCard = memo(function RoomCard({
       <Text style={[g.guest, !room.guest_name && { color: C.faint }]} numberOfLines={1}>
         {room.guest_name ?? 'Sin huésped'}
       </Text>
-      {room.status === 'revisada' ? (
-        <Text style={[g.missing, { color: room.units ? C.danger : c.ink }]} numberOfLines={1}>
-          {room.units ? `Falta: ${missingText(room.missing)}` : 'Sin consumo'}
-        </Text>
-      ) : (
-        <Text style={g.flight} numberOfLines={1}>
-          Vuelo <Text style={[g.flightTime, tabular]}>{room.flight_time ?? '—'}</Text>
-        </Text>
-      )}
+      <Text style={g.flight} numberOfLines={1}>
+        Vuelo <Text style={[g.flightTime, tabular]}>{room.flight_time ?? '—'}</Text>
+      </Text>
     </Pressable>
   );
 });
@@ -288,6 +299,7 @@ const g = StyleSheet.create({
   option: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 10, borderRadius: 10 },
   swatch: { width: 18, height: 18, borderRadius: 5, borderWidth: 1.5 },
   optionText: { flex: 1, fontSize: 15, color: C.ink },
+  optionSep: { marginTop: 6, borderTopWidth: 1, borderTopColor: C.line, borderTopLeftRadius: 0, borderTopRightRadius: 0, paddingTop: 14 },
   optionCount: { fontSize: 15, fontWeight: '600', color: C.muted },
   card: {
     height: CARD_H,

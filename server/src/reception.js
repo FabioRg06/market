@@ -9,6 +9,10 @@ import * as XLSX from 'xlsx';
 import { db, nextRev, transaction } from './db.js';
 import { catalog } from './seed.js';
 
+/** "bw 243", "Hab. BW-243" → "BW243" (igual que app/src/rooms.ts). */
+const normalizeRoomNumber = (raw) =>
+  raw.toUpperCase().replace(/HAB(ITACI[OÓ]N)?\.?/g, '').replace(/[\s\-_.#]/g, '');
+
 const TYPES = new Set(catalog.types.map((t) => t.code));
 
 function itemsFor(inspectionIds) {
@@ -108,7 +112,7 @@ const roomSql = `
     FROM rooms r JOIN blocks b ON b.id = r.block_id LEFT JOIN guests g ON g.room_id = r.id`;
 
 export function listRooms() {
-  const rooms = db.prepare(`${roomSql} WHERE r.active = 1 ORDER BY CAST(r.number AS INTEGER)`).all();
+  const rooms = db.prepare(`${roomSql} WHERE r.active = 1 ORDER BY r.sort`).all();
   const states = roomStates();
   return rooms.map((r) => summarize(r, states.get(r.id)));
 }
@@ -213,19 +217,19 @@ export function importSheet(buffer) {
   const cFlight = col(/vuelo|hora|salida/);
   const cType = col(/^tipo/);
 
-  const exists = db.prepare(`SELECT id FROM rooms WHERE id = ?`);
+  const byNumber = db.prepare(`SELECT id FROM rooms WHERE number = ? AND active = 1`);
   const marked = [];
   const notFound = [];
   transaction(() => {
     for (const r of rows.slice(headerIdx + 1)) {
       const raw = r[cRoom];
       if (raw == null || raw === '') continue;
-      const number = String(raw).match(/\d+/)?.[0];
-      if (!number || !exists.get(`r${number}`)) {
+      const number = normalizeRoomNumber(String(raw));
+      const id = byNumber.get(number)?.id;
+      if (!id) {
         notFound.push(String(raw));
         continue;
       }
-      const id = `r${number}`;
       setGuest(id, {
         guest_name: cGuest >= 0 && r[cGuest] != null ? String(r[cGuest]) : null,
         flight_time: cFlight >= 0 ? flightText(r[cFlight]) : null,
@@ -276,7 +280,7 @@ export function dayReport({ from, to }) {
     reviewed,
     restocked,
     pendingReview: pendingReview.map((r) => ({ room_id: r.id, room_number: r.number, block_code: r.block_code, guest_name: r.guest_name, flight_time: r.flight_time })),
-    pendingRestock: pendingRestock.map((r) => ({ room_id: r.id, room_number: r.number, block_code: r.block_code, units: r.units, total: r.total })),
+    pendingRestock: pendingRestock.map((r) => ({ room_id: r.id, room_number: r.number, block_code: r.block_code, units: r.units, total: r.total, missing: r.missing })),
   };
 }
 
@@ -349,8 +353,10 @@ export function setTypeInventory(type, items) {
 export function blocks() {
   return db
     .prepare(
-      `SELECT b.id, b.code, b.name, MIN(CAST(r.number AS INTEGER)) AS first, MAX(CAST(r.number AS INTEGER)) AS last, COUNT(r.id) AS rooms
-         FROM blocks b LEFT JOIN rooms r ON r.block_id = b.id GROUP BY b.id ORDER BY first`
+      `SELECT b.id, b.code, b.name, COUNT(r.id) AS rooms, MIN(r.sort) AS sort,
+              (SELECT number FROM rooms WHERE block_id = b.id AND active = 1 ORDER BY sort LIMIT 1) AS first,
+              (SELECT number FROM rooms WHERE block_id = b.id AND active = 1 ORDER BY sort DESC LIMIT 1) AS last
+         FROM blocks b JOIN rooms r ON r.block_id = b.id AND r.active = 1 GROUP BY b.id ORDER BY sort`
     )
     .all();
 }
@@ -362,4 +368,86 @@ export function updateBlock(id, { code, name }) {
     code?.trim() || b.code, name?.trim() || b.name, Date.now(), nextRev(), id
   );
   return true;
+}
+
+// ---------- Analítica ----------
+
+/** Indicadores para el panel de analítica en un rango de días. */
+export function analytics({ from, to }) {
+  const inspections = withItems(
+    db
+      .prepare(
+        `SELECT i.*, r.number AS room_number, r.type AS room_type, b.code AS block_code
+           FROM inspections i JOIN rooms r ON r.id = i.room_id JOIN blocks b ON b.id = r.block_id
+          WHERE i.finished_at >= ? AND i.finished_at < ?`
+      )
+      .all(from, to)
+  );
+  const work = inspections.filter((i) => i.kind !== 'confirmacion');
+  const durations = work.map((i) => i.finished_at - i.started_at).filter((d) => d > 0);
+  const avg = (xs) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0);
+
+  const people = new Map();
+  for (const i of inspections) {
+    const p = people.get(i.inspector) ?? { name: i.inspector, revisiones: 0, durations: [], total: 0, novedades: 0, last_at: 0 };
+    if (i.kind !== 'confirmacion') {
+      p.revisiones++;
+      p.durations.push(i.finished_at - i.started_at);
+    }
+    p.total += i.total;
+    if (i.kind === 'novedad') p.novedades++;
+    p.last_at = Math.max(p.last_at, i.finished_at);
+    people.set(i.inspector, p);
+  }
+
+  const products = new Map();
+  const blocks = new Map();
+  const types = new Map();
+  const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, revisiones: 0, total: 0 }));
+  for (const i of inspections) {
+    const h = new Date(i.finished_at).getHours();
+    if (i.kind !== 'confirmacion') hours[h].revisiones++;
+    hours[h].total += i.total;
+    const b = blocks.get(i.block_code) ?? { code: i.block_code, total: 0, units: 0 };
+    b.total += i.total;
+    b.units += i.units;
+    blocks.set(i.block_code, b);
+    const t = types.get(i.room_type) ?? { type: i.room_type, total: 0, units: 0 };
+    t.total += i.total;
+    t.units += i.units;
+    types.set(i.room_type, t);
+    for (const it of i.items) {
+      const p = products.get(it.product_id) ?? { id: it.product_id, name: it.name, units: 0, total: 0 };
+      p.units += it.quantity;
+      p.total += it.quantity * it.unit_price;
+      products.set(it.product_id, p);
+    }
+  }
+
+  const DAY = 24 * 60 * 60 * 1000;
+  const days = [];
+  for (let d = from; d < to; d += DAY) {
+    const list = inspections.filter((i) => i.finished_at >= d && i.finished_at < d + DAY);
+    days.push({ day: d, total: list.reduce((s, i) => s + i.total, 0), revisiones: list.filter((i) => i.kind !== 'confirmacion').length });
+  }
+
+  return {
+    kpis: {
+      revisiones: work.length,
+      habitaciones: new Set(work.map((i) => i.room_id)).size,
+      tiempo_medio: avg(durations),
+      total: inspections.reduce((s, i) => s + i.total, 0),
+      unidades: inspections.reduce((s, i) => s + i.units, 0),
+      novedades: inspections.filter((i) => i.kind === 'novedad').length,
+      con_consumo: work.filter((i) => i.units > 0).length,
+    },
+    people: [...people.values()]
+      .map(({ durations: ds, ...p }) => ({ ...p, tiempo_medio: avg(ds) }))
+      .sort((a, b) => b.revisiones - a.revisiones),
+    products: [...products.values()].sort((a, b) => b.units - a.units),
+    blocks: [...blocks.values()].sort((a, b) => b.total - a.total),
+    types: [...types.values()].sort((a, b) => b.total - a.total),
+    hours,
+    days,
+  };
 }

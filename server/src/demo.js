@@ -50,7 +50,7 @@ const now = Date.now();
 const elapsed = Math.max(60 * MIN, now - t0);
 
 transaction(() => {
-  const rooms = db.prepare(`SELECT id FROM rooms ORDER BY CAST(number AS INTEGER)`).all();
+  const rooms = db.prepare(`SELECT id FROM rooms WHERE active = 1 ORDER BY sort`).all();
   for (const { id } of rooms) {
     const type = randomType();
     setRoomType(id, type);

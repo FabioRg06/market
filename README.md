@@ -50,8 +50,11 @@ Hay un **inventario global** (todo lo que ofrece Market, con foto y precio) y ca
 
 ## Vista de recepción (computador)
 
-- *Habitaciones*: resumen (por revisar, revisadas, novedades, surtidas, por reponer) y la cuadrícula; cada habitación abre un panel lateral con huésped, tipo, lo pendiente como factura y el historial.
-- *Reporte del día*: revisadas, sin revisar, surtidas y falta surtir; se descarga para Excel.
+Consola para el computador, con menú lateral:
+
+- *Habitaciones*: barra con el estado de todo el hotel y el consumo de minibar de hoy, y la cuadrícula con filtros (estado, por confirmar, con novedad, bloque). Cada habitación abre un panel lateral de solo lectura; el lápiz permite editar huésped, vuelo, tipo y lo consumido.
+- *Analítica*: consumo, revisiones, tiempo medio, equipo (revisiones y tiempo medio por persona), lo que más se consume, revisiones por hora o consumo por día, por tipo y por bloque. Hoy, 7 o 30 días.
+- *Reporte del día*: en PDF con el orden del reporte en papel (Sí/No, pendiente, novedades, sin revisar y detalle); también en CSV para Excel.
 - *Inventario*: global y por tipo; las fotos se suben tocando la imagen del producto.
 - *Bloques*: código y nombre de cada bloque (los rangos de habitaciones son fijos, en `app/src/catalog.json`).
 - Se actualiza sola cada 15 segundos.
@@ -76,8 +79,9 @@ Al iniciar muestra las direcciones, por ejemplo:
 ```
 
 El catálogo es fijo y está en `app/src/catalog.json` (lo usan la app y el servidor):
-700 habitaciones en 7 bloques (Bloque 1: 101–200 … Bloque 7: 701–800) y los 13 productos
-del minibar con su precio y cantidad estándar. Como viene dentro de la app, una tablet puede
+542 habitaciones en 12 bloques (C100, C200, C300, K, L, BW100, BW200, BW300, BW400, R700,
+R800 y 500), con los rangos de la hoja del hotel, los tipos conocidos de cada habitación y los
+13 productos del minibar. Como viene dentro de la app, una tablet puede
 revisar aunque nunca se haya conectado al servidor. La base queda en `server/data/market.db`:
 **haz copia de ese archivo** para respaldar.
 

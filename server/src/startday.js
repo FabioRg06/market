@@ -27,7 +27,7 @@ transaction(() => {
   for (const { room_id } of db.prepare(`SELECT room_id FROM guests`).all())
     setGuest(room_id, { guest_name: null, flight_time: null, review: false });
 
-  const rooms = db.prepare(`SELECT id FROM rooms ORDER BY RANDOM() LIMIT ?`).all(count);
+  const rooms = db.prepare(`SELECT id FROM rooms WHERE active = 1 ORDER BY RANDOM() LIMIT ?`).all(count);
   for (const { id } of rooms)
     setGuest(id, { guest_name: pick(NAMES), flight_time: `${pad(6 + Math.floor(Math.random() * 16))}:${pick(['00', '15', '30', '45'])}`, review: true });
 });

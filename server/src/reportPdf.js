@@ -1,17 +1,21 @@
-// Reporte del día en PDF: resumen y tablas de revisadas, sin revisar, surtidas y falta surtir.
+// Reporte del día en PDF, con el mismo orden del reporte en papel:
+// Sí / No (revisadas y sin revisar), Pendiente (lo que falta surtir), Novedades y el detalle.
 import PDFDocument from 'pdfkit';
 import { dayReport } from './reception.js';
 
 const BRAND = '#1E40AF';
+const NAVY = '#0B1640';
 const INK = '#0F172A';
 const MUTED = '#64748B';
 const LINE = '#DCE3F1';
+const RED = '#B42318';
 const KIND = { revision: 'Revisión', consumo: 'Consumo', novedad: 'Novedad', confirmacion: 'Confirmación' };
 
 const money = (v) => '$ ' + Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 const time = (ms) => (ms ? new Date(ms).toLocaleTimeString('es-CO', { hour12: false }) : '—');
 const dateText = (ms) =>
   new Date(ms).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const itemsText = (items) => items.map((it) => `${it.quantity} ${it.name}`).join(', ');
 
 /** Escribe el PDF en `stream` (la respuesta HTTP). */
 export function writeDayReportPdf(range, stream) {
@@ -21,129 +25,145 @@ export function writeDayReportPdf(range, stream) {
   const left = doc.page.margins.left;
   const width = doc.page.width - left - doc.page.margins.right;
   const bottom = () => doc.page.height - doc.page.margins.bottom;
+  const ensure = (h) => {
+    if (doc.y + h > bottom()) doc.addPage();
+  };
 
   // Encabezado
-  doc.rect(0, 0, doc.page.width, 78).fill(BRAND);
-  doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(20).text('Reporte del día', left, 22);
-  doc.font('Helvetica').fontSize(11).fillColor('#C7D3F5').text(`Market · minibar · ${dateText(range.from)}`, left, 48);
-  doc.y = 98;
+  doc.rect(0, 0, doc.page.width, 84).fill(NAVY);
+  doc.rect(0, 84, doc.page.width, 4).fill(BRAND);
+  doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(22).text('Reporte del día', left, 24, { lineBreak: false });
+  doc.font('Helvetica').fontSize(11).fillColor('#C7D3F5').text(dateText(range.from), left, 54, { lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(11).fillColor('#FFFFFF').text('MARKET', left, 30, { width, align: 'right', lineBreak: false });
 
-  // Resumen
+  // Resumen: una fila, todas las casillas a la misma altura.
+  const top = 108;
   const stats = [
-    ['Revisadas', rep.counts.revisadas],
-    ['Sin revisar', rep.counts.por_revisar],
-    ['Surtidas', rep.counts.surtidas],
-    ['Falta surtir', rep.counts.por_surtir],
-    ['Novedades', rep.counts.novedades],
-    ['Consumo', money(rep.counts.total)],
+    ['Sí · revisadas', String(rep.counts.revisadas), INK],
+    ['No · sin revisar', String(rep.counts.por_revisar), INK],
+    ['Pendiente', String(rep.counts.por_surtir), INK],
+    ['Novedades', String(rep.counts.novedades), rep.counts.novedades ? RED : INK],
+    ['Consumo', money(rep.counts.total), INK],
   ];
-  const boxW = (width - 5 * 8) / 6;
-  const top = doc.y; // misma fila para todas las casillas (doc.text mueve doc.y)
-  stats.forEach(([label, value], i) => {
-    const x = left + i * (boxW + 8);
-    doc.roundedRect(x, top, boxW, 46, 6).lineWidth(1).strokeColor(LINE).stroke();
-    doc.font('Helvetica').fontSize(8).fillColor(MUTED).text(label, x + 8, top + 8, { width: boxW - 16, lineBreak: false });
-    doc.font('Helvetica-Bold').fontSize(14).fillColor(INK).text(String(value), x + 8, top + 22, { width: boxW - 16, lineBreak: false });
+  const gap = 10;
+  const boxW = (width - gap * (stats.length - 1)) / stats.length;
+  stats.forEach(([label, value, color], i) => {
+    const x = left + i * (boxW + gap);
+    doc.roundedRect(x, top, boxW, 54, 6).lineWidth(1).strokeColor(LINE).stroke();
+    doc.font('Helvetica').fontSize(8).fillColor(MUTED).text(label.toUpperCase(), x + 10, top + 10, { width: boxW - 20, lineBreak: false });
+    // La cifra se achica si no cabe en la casilla (p. ej. "$ 1.727.000").
+    let size = 17;
+    doc.font('Helvetica-Bold');
+    while (size > 9 && doc.fontSize(size).widthOfString(value) > boxW - 20) size--;
+    doc.fontSize(size).fillColor(color).text(value, x + 10, top + 26 + (17 - size) / 2, { width: boxW - 20, lineBreak: false });
   });
-  doc.y = top + 66;
+  doc.x = left;
+  doc.y = top + 78;
 
-  function table(title, columns, rows) {
-    if (doc.y > bottom() - 80) doc.addPage();
-    doc.font('Helvetica-Bold').fontSize(12).fillColor(INK).text(`${title} (${rows.length})`, left, doc.y);
-    doc.moveDown(0.4);
-    const header = () => {
-      let x = left;
-      const y = doc.y;
-      doc.rect(left, y - 3, width, 16).fill('#EDF1FA');
-      doc.font('Helvetica-Bold').fontSize(8).fillColor(MUTED);
-      for (const c of columns) {
-        doc.text(c.label, x + 3, y, { width: c.w * width - 6, align: c.align ?? 'left' });
-        x += c.w * width;
-      }
-      doc.y = y + 16;
-    };
-    header();
+  function heading(text, count) {
+    ensure(40);
+    doc.font('Helvetica-Bold').fontSize(13).fillColor(INK).text(text, left, doc.y, { continued: count != null });
+    if (count != null) doc.font('Helvetica').fillColor(MUTED).text(`  ${count}`);
+    doc.moveTo(left, doc.y + 3).lineTo(left + width, doc.y + 3).lineWidth(1).strokeColor(BRAND).stroke();
+    doc.y += 10;
+  }
+
+  // Lista "habitación — detalle", como en el papel.
+  function list(rows, empty, color = INK) {
     if (!rows.length) {
-      doc.font('Helvetica').fontSize(9).fillColor(MUTED).text('Nada para mostrar.', left + 3, doc.y + 2);
-      doc.y += 22;
+      doc.font('Helvetica').fontSize(10).fillColor(MUTED).text(empty, left, doc.y);
+      doc.y += 14;
       return;
     }
-    for (const r of rows) {
+    for (const [room, detail, right] of rows) {
+      doc.font('Helvetica').fontSize(10);
+      const h = Math.max(16, doc.heightOfString(detail, { width: width - 160 }) + 6);
+      ensure(h);
+      const y = doc.y;
+      doc.font('Helvetica-Bold').fillColor(color).text(room, left, y, { width: 70, lineBreak: false });
+      doc.font('Helvetica').fillColor(INK).text(detail, left + 76, y, { width: width - 160 });
+      if (right) doc.fillColor(MUTED).text(right, left + width - 80, y, { width: 80, align: 'right', lineBreak: false });
+      doc.y = y + h;
+    }
+    doc.y += 10;
+  }
+
+  heading('Pendiente por surtir', rep.pendingRestock.length);
+  list(
+    rep.pendingRestock.map((r) => [r.room_number, r.units ? itemsText(r.missing) : 'Sin consumo', r.units ? money(r.total) : '']),
+    'Todo lo revisado está surtido.'
+  );
+
+  const novedades = rep.reviewed.filter((i) => i.kind === 'novedad');
+  heading('Novedades', novedades.length);
+  list(
+    novedades.map((i) => [i.room_number, `${itemsText(i.items)} · posterior`, time(i.finished_at)]),
+    'Sin novedades.',
+    RED
+  );
+
+  heading('Sin revisar', rep.pendingReview.length);
+  list(
+    rep.pendingReview.map((r) => [r.room_number, r.guest_name ?? '—', r.flight_time ? `vuelo ${r.flight_time}` : '']),
+    'No quedan habitaciones por revisar.'
+  );
+
+  // Detalle de revisiones
+  heading('Revisiones del día', rep.reviewed.length);
+  const cols = [
+    { label: 'Hab.', w: 0.09 },
+    { label: 'Clase', w: 0.12 },
+    { label: 'Quién', w: 0.13 },
+    { label: 'Entrada', w: 0.11 },
+    { label: 'Salida', w: 0.11 },
+    { label: 'Consumo', w: 0.32 },
+    { label: 'Total', w: 0.12, align: 'right' },
+  ];
+  const header = () => {
+    ensure(20);
+    const y = doc.y;
+    doc.rect(left, y - 3, width, 17).fill('#EDF1FA');
+    let x = left;
+    doc.font('Helvetica-Bold').fontSize(8).fillColor(MUTED);
+    for (const c of cols) {
+      doc.text(c.label.toUpperCase(), x + 4, y + 1, { width: c.w * width - 8, align: c.align ?? 'left', lineBreak: false });
+      x += c.w * width;
+    }
+    doc.y = y + 18;
+  };
+  if (!rep.reviewed.length) {
+    doc.font('Helvetica').fontSize(10).fillColor(MUTED).text('Nadie ha revisado habitaciones este día.', left, doc.y);
+  } else {
+    header();
+    for (const i of rep.reviewed) {
+      const cells = [
+        i.room_number,
+        KIND[i.kind] ?? 'Revisión',
+        i.inspector,
+        time(i.started_at),
+        time(i.finished_at),
+        i.units ? itemsText(i.items) : 'Sin consumo',
+        money(i.total),
+      ];
       doc.font('Helvetica').fontSize(9);
-      const h = Math.max(
-        14,
-        ...columns.map((c, i) => doc.heightOfString(String(r[i] ?? ''), { width: c.w * width - 6 }) + 5)
-      );
+      const h = Math.max(16, ...cols.map((c, k) => doc.heightOfString(String(cells[k]), { width: c.w * width - 8 }) + 6));
       if (doc.y + h > bottom()) {
         doc.addPage();
         header();
       }
-      let x = left;
       const y = doc.y;
-      columns.forEach((c, i) => {
-        doc.fillColor(c.color?.(r) ?? INK).text(String(r[i] ?? ''), x + 3, y + 2, { width: c.w * width - 6, align: c.align ?? 'left' });
+      let x = left;
+      cols.forEach((c, k) => {
+        doc.fillColor(k === 1 && i.kind === 'novedad' ? RED : INK).text(String(cells[k]), x + 4, y + 3, { width: c.w * width - 8, align: c.align ?? 'left' });
         x += c.w * width;
       });
       doc.moveTo(left, y + h).lineTo(left + width, y + h).lineWidth(0.5).strokeColor(LINE).stroke();
       doc.y = y + h;
     }
-    doc.y += 16;
   }
 
-  table(
-    'Revisadas',
-    [
-      { label: 'Hab.', w: 0.07 },
-      { label: 'Tipo', w: 0.06 },
-      { label: 'Clase', w: 0.12, color: (r) => (r[2] === 'Novedad' ? '#B42318' : INK) },
-      { label: 'Quién', w: 0.11 },
-      { label: 'Entrada', w: 0.1 },
-      { label: 'Salida', w: 0.1 },
-      { label: 'Consumo', w: 0.32 },
-      { label: 'Total', w: 0.12, align: 'right' },
-    ],
-    rep.reviewed.map((i) => [
-      i.room_number,
-      i.room_type,
-      KIND[i.kind] ?? 'Revisión',
-      i.inspector,
-      time(i.started_at),
-      time(i.finished_at),
-      i.units ? i.items.map((it) => `${it.quantity} ${it.name}`).join(', ') : 'Sin consumo',
-      money(i.total),
-    ])
-  );
-  table(
-    'Sin revisar',
-    [
-      { label: 'Hab.', w: 0.1 },
-      { label: 'Bloque', w: 0.12 },
-      { label: 'Huésped', w: 0.58 },
-      { label: 'Vuelo', w: 0.2 },
-    ],
-    rep.pendingReview.map((r) => [r.room_number, r.block_code, r.guest_name ?? '—', r.flight_time ?? '—'])
-  );
-  table(
-    'Surtidas',
-    [
-      { label: 'Hab.', w: 0.1 },
-      { label: 'Bloque', w: 0.12 },
-      { label: 'Quién surtió', w: 0.53 },
-      { label: 'Hora', w: 0.25 },
-    ],
-    rep.restocked.map((r) => [r.room_number, r.block_code, r.restocked_by ?? '—', time(r.restocked_at)])
-  );
-  table(
-    'Falta surtir',
-    [
-      { label: 'Hab.', w: 0.1 },
-      { label: 'Bloque', w: 0.12 },
-      { label: 'Pendiente', w: 0.53 },
-      { label: 'Total', w: 0.25, align: 'right' },
-    ],
-    rep.pendingRestock.map((r) => [r.room_number, r.block_code, r.units ? `${r.units} productos` : 'Sin consumo', money(r.total)])
-  );
-
+  doc.y += 16;
+  ensure(20);
   doc.font('Helvetica').fontSize(8).fillColor(MUTED).text(`Generado ${new Date().toLocaleString('es-CO', { hour12: false })}`, left, doc.y);
   doc.end();
 }

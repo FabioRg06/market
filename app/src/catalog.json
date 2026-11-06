@@ -1,41 +1,409 @@
 {
   "blocks": [
-    { "id": "b1", "code": "B1", "name": "Bloque 1", "from": 101, "to": 200 },
-    { "id": "b2", "code": "B2", "name": "Bloque 2", "from": 201, "to": 300 },
-    { "id": "b3", "code": "B3", "name": "Bloque 3", "from": 301, "to": 400 },
-    { "id": "b4", "code": "B4", "name": "Bloque 4", "from": 401, "to": 500 },
-    { "id": "b5", "code": "B5", "name": "Bloque 5", "from": 501, "to": 600 },
-    { "id": "b6", "code": "B6", "name": "Bloque 6", "from": 601, "to": 700 },
-    { "id": "b7", "code": "B7", "name": "Bloque 7", "from": 701, "to": 800 }
+    {
+      "id": "c100",
+      "code": "C100",
+      "name": "C 100",
+      "ranges": [
+        [
+          "C",
+          101,
+          122
+        ]
+      ]
+    },
+    {
+      "id": "c200",
+      "code": "C200",
+      "name": "C 200",
+      "ranges": [
+        [
+          "C",
+          201,
+          223
+        ]
+      ]
+    },
+    {
+      "id": "c300",
+      "code": "C300",
+      "name": "C 300",
+      "ranges": [
+        [
+          "C",
+          301,
+          323
+        ]
+      ]
+    },
+    {
+      "id": "k",
+      "code": "K",
+      "name": "K",
+      "ranges": [
+        [
+          "K",
+          101,
+          116
+        ],
+        [
+          "K",
+          201,
+          212
+        ],
+        [
+          "K",
+          301,
+          308
+        ]
+      ]
+    },
+    {
+      "id": "l",
+      "code": "L",
+      "name": "L",
+      "ranges": [
+        [
+          "L",
+          101,
+          108
+        ],
+        [
+          "L",
+          201,
+          208
+        ],
+        [
+          "L",
+          301,
+          316
+        ],
+        [
+          "L",
+          401,
+          408
+        ]
+      ]
+    },
+    {
+      "id": "bw100",
+      "code": "BW100",
+      "name": "BW 100",
+      "ranges": [
+        [
+          "BW",
+          101,
+          168
+        ]
+      ]
+    },
+    {
+      "id": "bw200",
+      "code": "BW200",
+      "name": "BW 200",
+      "ranges": [
+        [
+          "BW",
+          201,
+          280
+        ]
+      ]
+    },
+    {
+      "id": "bw300",
+      "code": "BW300",
+      "name": "BW 300",
+      "ranges": [
+        [
+          "BW",
+          301,
+          374
+        ]
+      ]
+    },
+    {
+      "id": "bw400",
+      "code": "BW400",
+      "name": "BW 400",
+      "ranges": [
+        [
+          "BW",
+          401,
+          488
+        ]
+      ]
+    },
+    {
+      "id": "r700",
+      "code": "R700",
+      "name": "R 700",
+      "ranges": [
+        [
+          "R",
+          701,
+          742
+        ]
+      ]
+    },
+    {
+      "id": "r800",
+      "code": "R800",
+      "name": "R 800",
+      "ranges": [
+        [
+          "R",
+          801,
+          843
+        ]
+      ]
+    },
+    {
+      "id": "s500",
+      "code": "500",
+      "name": "500",
+      "ranges": [
+        [
+          "",
+          501,
+          503
+        ]
+      ]
+    }
   ],
   "types": [
-    { "code": "CM", "name": "Con minibar", "color": "#2E9E5B", "ink": "#FFFFFF" },
-    { "code": "SS", "name": "Solo seco", "color": "#F2C230", "ink": "#3D2E00" },
-    { "code": "SM", "name": "Sin minibar", "color": "#F07F1E", "ink": "#FFFFFF" },
-    { "code": "PR", "name": "Provisional", "color": "#D93636", "ink": "#FFFFFF" },
-    { "code": "VIP", "name": "VIP", "color": "#111827", "ink": "#F5D27A" }
+    {
+      "code": "CM",
+      "name": "Con minibar",
+      "color": "#2E9E5B",
+      "ink": "#FFFFFF"
+    },
+    {
+      "code": "SS",
+      "name": "Solo seco",
+      "color": "#F2C230",
+      "ink": "#3D2E00"
+    },
+    {
+      "code": "SM",
+      "name": "Sin minibar",
+      "color": "#F07F1E",
+      "ink": "#FFFFFF"
+    },
+    {
+      "code": "PR",
+      "name": "Provisional",
+      "color": "#D93636",
+      "ink": "#FFFFFF"
+    },
+    {
+      "code": "VIP",
+      "name": "VIP",
+      "color": "#111827",
+      "ink": "#F5D27A"
+    }
   ],
   "defaultType": "CM",
   "products": [
-    { "id": "agua", "name": "Agua", "price": 5000, "sort": 1 },
-    { "id": "cocacola", "name": "Coca-Cola", "price": 6000, "sort": 2 },
-    { "id": "gatorade", "name": "Gatorade", "price": 7000, "sort": 3 },
-    { "id": "hit", "name": "Jugo Hit", "price": 5000, "sort": 4 },
-    { "id": "detodito_g", "name": "Detodito grande", "price": 9000, "sort": 5 },
-    { "id": "detodito_p", "name": "Detodito pequeño", "price": 5000, "sort": 6 },
-    { "id": "mani_g", "name": "Maní grande", "price": 7000, "sort": 7 },
-    { "id": "mani_p", "name": "Maní pequeño", "price": 4000, "sort": 8 },
-    { "id": "salchichas", "name": "Lata de salchichas", "price": 9000, "sort": 9 },
-    { "id": "crema", "name": "Crema dental", "price": 8000, "sort": 10 },
-    { "id": "cepillo", "name": "Cepillo de dientes", "price": 6000, "sort": 11 },
-    { "id": "shampoo", "name": "Shampoo", "price": 5000, "sort": 12 },
-    { "id": "preservativo", "name": "Preservativo", "price": 8000, "sort": 13 }
+    {
+      "id": "agua",
+      "name": "Agua",
+      "price": 5000,
+      "sort": 1
+    },
+    {
+      "id": "cocacola",
+      "name": "Coca-Cola",
+      "price": 6000,
+      "sort": 2
+    },
+    {
+      "id": "gatorade",
+      "name": "Gatorade",
+      "price": 7000,
+      "sort": 3
+    },
+    {
+      "id": "hit",
+      "name": "Jugo Hit",
+      "price": 5000,
+      "sort": 4
+    },
+    {
+      "id": "detodito_g",
+      "name": "Detodito grande",
+      "price": 9000,
+      "sort": 5
+    },
+    {
+      "id": "detodito_p",
+      "name": "Detodito pequeño",
+      "price": 5000,
+      "sort": 6
+    },
+    {
+      "id": "mani_g",
+      "name": "Maní grande",
+      "price": 7000,
+      "sort": 7
+    },
+    {
+      "id": "mani_p",
+      "name": "Maní pequeño",
+      "price": 4000,
+      "sort": 8
+    },
+    {
+      "id": "salchichas",
+      "name": "Lata de salchichas",
+      "price": 9000,
+      "sort": 9
+    },
+    {
+      "id": "crema",
+      "name": "Crema dental",
+      "price": 8000,
+      "sort": 10
+    },
+    {
+      "id": "cepillo",
+      "name": "Cepillo de dientes",
+      "price": 6000,
+      "sort": 11
+    },
+    {
+      "id": "shampoo",
+      "name": "Shampoo",
+      "price": 5000,
+      "sort": 12
+    },
+    {
+      "id": "preservativo",
+      "name": "Preservativo",
+      "price": 8000,
+      "sort": 13
+    }
   ],
   "typeInventory": {
-    "CM": { "agua": 2, "cocacola": 2, "gatorade": 2, "hit": 1, "detodito_g": 1, "detodito_p": 1, "mani_g": 1, "mani_p": 1, "salchichas": 1, "crema": 1, "cepillo": 1, "shampoo": 2, "preservativo": 1 },
-    "SS": { "detodito_g": 1, "detodito_p": 1, "mani_g": 1, "mani_p": 1, "salchichas": 1 },
-    "SM": { "crema": 1, "cepillo": 1, "shampoo": 2 },
-    "PR": { "agua": 2, "detodito_p": 1, "mani_p": 1, "crema": 1, "cepillo": 1, "shampoo": 2 },
-    "VIP": { "agua": 4, "cocacola": 2, "gatorade": 2, "hit": 2, "detodito_g": 2, "detodito_p": 1, "mani_g": 2, "mani_p": 1, "salchichas": 1, "crema": 1, "cepillo": 2, "shampoo": 2, "preservativo": 2 }
+    "CM": {
+      "agua": 2,
+      "cocacola": 2,
+      "gatorade": 2,
+      "hit": 1,
+      "detodito_g": 1,
+      "detodito_p": 1,
+      "mani_g": 1,
+      "mani_p": 1,
+      "salchichas": 1,
+      "crema": 1,
+      "cepillo": 1,
+      "shampoo": 2,
+      "preservativo": 1
+    },
+    "SS": {
+      "detodito_g": 1,
+      "detodito_p": 1,
+      "mani_g": 1,
+      "mani_p": 1,
+      "salchichas": 1
+    },
+    "SM": {
+      "crema": 1,
+      "cepillo": 1,
+      "shampoo": 2
+    },
+    "PR": {
+      "agua": 2,
+      "detodito_p": 1,
+      "mani_p": 1,
+      "crema": 1,
+      "cepillo": 1,
+      "shampoo": 2
+    },
+    "VIP": {
+      "agua": 4,
+      "cocacola": 2,
+      "gatorade": 2,
+      "hit": 2,
+      "detodito_g": 2,
+      "detodito_p": 1,
+      "mani_g": 2,
+      "mani_p": 1,
+      "salchichas": 1,
+      "crema": 1,
+      "cepillo": 2,
+      "shampoo": 2,
+      "preservativo": 2
+    }
+  },
+  "roomTypes": {
+    "PR": [
+      "C102",
+      "BW101",
+      "BW102",
+      "BW244"
+    ],
+    "SM": [
+      "C306",
+      "C307",
+      "C323",
+      "K105",
+      "K207",
+      "L106",
+      "L204",
+      "BW134",
+      "BW138",
+      "BW140",
+      "BW143",
+      "BW201",
+      "BW205",
+      "BW211",
+      "BW256",
+      "BW257",
+      "BW262",
+      "BW270",
+      "BW273",
+      "BW276",
+      "BW278",
+      "BW279",
+      "BW312",
+      "BW323",
+      "BW336",
+      "BW350",
+      "BW356",
+      "BW410",
+      "BW412",
+      "BW413",
+      "BW438",
+      "BW439",
+      "BW441",
+      "R828"
+    ],
+    "SS": [
+      "C101",
+      "C216",
+      "C303",
+      "K209",
+      "K212",
+      "K307",
+      "L207",
+      "L208",
+      "L303",
+      "L407",
+      "L408",
+      "BW110",
+      "BW152",
+      "BW164",
+      "BW167",
+      "BW241",
+      "BW269",
+      "BW304",
+      "BW444",
+      "BW446",
+      "BW447",
+      "BW448",
+      "BW450",
+      "BW451",
+      "BW452"
+    ]
   }
 }

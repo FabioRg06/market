@@ -21,6 +21,7 @@ import type {
 import { roomState } from '../format';
 import { uuid } from '../uuid';
 import catalog from '../catalog.json';
+import { CATALOG_ROOMS } from '../rooms';
 
 type Dirty = { dirty: 0 | 1 };
 interface Store {
@@ -38,9 +39,8 @@ interface Store {
 const KEY = 'market.db.v2';
 const KEEP_DAYS = 3; // el navegador guarda menos historia que la tablet
 
-const ROOMS = catalog.blocks.flatMap((b) =>
-  Array.from({ length: b.to - b.from + 1 }, (_, i) => ({ id: `r${b.from + i}`, number: String(b.from + i), block_id: b.id }))
-);
+const ROOMS = CATALOG_ROOMS.map(({ id, number, block_id }) => ({ id, number, block_id }));
+const CATALOG_TYPE = new Map(CATALOG_ROOMS.map((r) => [r.id, r.type]));
 const ROOM_BY_ID = new Map(ROOMS.map((r) => [r.id, r]));
 
 function empty(): Store {
@@ -71,7 +71,7 @@ function save() {
 }
 
 const invKey = (roomId: string, productId: string) => `${roomId}:${productId}`;
-const typeOf = (roomId: string): RoomType => st.roomTypes[roomId] ?? (catalog.defaultType as RoomType);
+const typeOf = (roomId: string): RoomType => st.roomTypes[roomId] ?? CATALOG_TYPE.get(roomId) ?? (catalog.defaultType as RoomType);
 const sortedProducts = () => Object.values(st.products).filter((p) => p.active).sort((a, b) => a.sort - b.sort);
 const plain = ({ dirty, synced, ...i }: Inspection & Dirty & { synced?: 1 }): Inspection => i;
 

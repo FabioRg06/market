@@ -79,7 +79,7 @@ export function pullSince(since = 0) {
   return {
     rev,
     blocks: q(`SELECT id, code, name, updated_at FROM blocks WHERE rev > ?`),
-    rooms: q(`SELECT id, block_id, number, type, active, updated_at FROM rooms WHERE rev > ?`),
+    rooms: q(`SELECT id, block_id, number, type, sort, active, updated_at FROM rooms WHERE rev > ?`),
     products: q(`SELECT id, name, price, std_qty, sort, image, active, updated_at FROM products WHERE rev > ?`),
     type_inventory: q(`SELECT type, product_id, quantity, updated_at FROM type_inventory WHERE rev > ?`),
     guests: q(`SELECT room_id, guest_name, flight_time, review_at, updated_at FROM guests WHERE rev > ?`),

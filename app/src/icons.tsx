@@ -66,6 +66,62 @@ export function GearGlyph({ size = 22, color = '#334155' }: IconProps) {
   );
 }
 
+// Íconos del menú de recepción.
+export function GridGlyph({ size = 20, color = '#334155' }: IconProps) {
+  return (
+    <Base size={size} color={color} strokeWidth={3.5}>
+      <Rect x={7} y={7} width={14} height={14} rx={3} />
+      <Rect x={27} y={7} width={14} height={14} rx={3} />
+      <Rect x={7} y={27} width={14} height={14} rx={3} />
+      <Rect x={27} y={27} width={14} height={14} rx={3} />
+    </Base>
+  );
+}
+
+export function ChartGlyph({ size = 20, color = '#334155' }: IconProps) {
+  return (
+    <Base size={size} color={color} strokeWidth={3.5}>
+      <Path d="M8 40h32" />
+      <Path d="M13 34V22M22 34V12M31 34V26M40 34V17" />
+    </Base>
+  );
+}
+
+export function DocGlyph({ size = 20, color = '#334155' }: IconProps) {
+  return (
+    <Base size={size} color={color} strokeWidth={3.5}>
+      <Path d="M12 5h17l9 9v29H12z" />
+      <Path d="M29 5v9h9M18 25h14M18 32h14" />
+    </Base>
+  );
+}
+
+export function BoxGlyph({ size = 20, color = '#334155' }: IconProps) {
+  return (
+    <Base size={size} color={color} strokeWidth={3.5}>
+      <Path d="M24 5l17 9v20l-17 9-17-9V14z" />
+      <Path d="M7 14l17 9 17-9M24 23v20" />
+    </Base>
+  );
+}
+
+export function LayersGlyph({ size = 20, color = '#334155' }: IconProps) {
+  return (
+    <Base size={size} color={color} strokeWidth={3.5}>
+      <Path d="M24 6l18 9-18 9-18-9z" />
+      <Path d="M6 24l18 9 18-9M6 33l18 9 18-9" />
+    </Base>
+  );
+}
+
+export function UploadGlyph({ size = 18, color = '#334155' }: IconProps) {
+  return (
+    <Base size={size} color={color} strokeWidth={4}>
+      <Path d="M24 32V8M14 18l10-10 10 10M8 34v6h32v-6" />
+    </Base>
+  );
+}
+
 export function PencilGlyph({ size = 20, color = '#334155' }: IconProps) {
   return (
     <Base size={size} color={color} strokeWidth={3.5}>

@@ -22,6 +22,7 @@ export interface Room {
   block_id: string;
   number: string;
   type: RoomType;
+  sort?: number;
   active: number;
   updated_at: number;
 }
