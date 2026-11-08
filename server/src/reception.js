@@ -402,15 +402,12 @@ export function dayReport({ from, to }) {
   };
 }
 
-/** Salidas que hay que revisar ese día: las marcadas "por revisar" en el día (y, si es hoy,
- *  todas las que siguen por revisar). Ordenadas por trabajador y hora de vuelo. */
+/** Salidas del día: las marcadas "por revisar" en el día (y, si es hoy, todas las que siguen
+ *  por revisar), en el orden de las habitaciones. */
 export function checkouts({ from, to }) {
   const now = Date.now();
   const today = now >= from && now < to;
-  const flight = (t) => (t && /\d/.test(t) ? t.padStart(5, '0') : '99:99');
-  return listRooms()
-    .filter((r) => r.type !== 'SM' && ((r.review_at >= from && r.review_at < to) || (today && r.status === 'por_revisar')))
-    .sort((a, b) => (!a.worker_name - !b.worker_name) || (a.worker_name ?? '').localeCompare(b.worker_name ?? '') || flight(a.flight_time).localeCompare(flight(b.flight_time)));
+  return listRooms().filter((r) => r.type !== 'SM' && ((r.review_at >= from && r.review_at < to) || (today && r.status === 'por_revisar')));
 }
 
 export function products() {

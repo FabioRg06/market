@@ -52,7 +52,7 @@ export default function ReportPanel({ onOpenRoom }: { onOpenRoom: (roomId: strin
         <Btn title="›" variant="secondary" disabled={isToday} onPress={() => setDay(Math.min(Date.now(), day + DAY))} style={{ minHeight: 40, paddingHorizontal: 14 }} />
         <View style={{ flex: 1 }} />
         <Btn
-          title="Salidas a revisar (PDF)"
+          title="Reporte de salidas (PDF)"
           variant="secondary"
           onPress={async () => openUrl(`${(await getSettings()).serverUrl}/api/salidas.pdf?from=${from}&to=${to}`)}
           style={{ minHeight: 40 }}

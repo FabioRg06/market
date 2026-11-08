@@ -197,10 +197,10 @@ export function writeDayReportPdf(range, stream) {
   doc.end();
 }
 
-/** Lista de salidas para revisar ese día, agrupada por trabajador, con casilla para marcar. */
+/** Reporte de salidas: todas las habitaciones que salen ese día, en orden, con casilla para marcar. */
 export function writeCheckoutsPdf(range, stream) {
   const rooms = checkouts(range);
-  const doc = new PDFDocument({ size: 'LETTER', margin: 40, info: { Title: 'Salidas a revisar · Market' } });
+  const doc = new PDFDocument({ size: 'LETTER', margin: 40, info: { Title: 'Reporte de salidas · Market' } });
   doc.pipe(stream);
   const left = doc.page.margins.left;
   const width = doc.page.width - left - doc.page.margins.right;
@@ -208,7 +208,7 @@ export function writeCheckoutsPdf(range, stream) {
 
   doc.rect(0, 0, doc.page.width, 84).fill(NAVY);
   doc.rect(0, 84, doc.page.width, 4).fill(BRAND);
-  doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(22).text('Salidas a revisar', left, 24, { lineBreak: false });
+  doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(22).text('Reporte de salidas', left, 24, { lineBreak: false });
   doc.font('Helvetica').fontSize(11).fillColor('#C7D3F5').text(dateText(range.from), left, 54, { lineBreak: false });
   doc.font('Helvetica-Bold').fontSize(11).fillColor('#FFFFFF').text(`${rooms.length} habitaciones`, left, 30, { width, align: 'right', lineBreak: false });
   doc.x = left;
@@ -240,20 +240,9 @@ export function writeCheckoutsPdf(range, stream) {
     doc.y = y + 18;
   };
 
-  const groups = new Map();
-  for (const r of rooms) {
-    const k = r.worker_name ?? 'Sin asignar';
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(r);
-  }
-  for (const [worker, list] of groups) {
-    if (doc.y + 60 > bottom()) doc.addPage();
-    doc.font('Helvetica-Bold').fontSize(13).fillColor(INK).text(worker, left, doc.y, { continued: true });
-    doc.font('Helvetica').fillColor(MUTED).text(`  ${list.length}`);
-    doc.moveTo(left, doc.y + 3).lineTo(left + width, doc.y + 3).lineWidth(1).strokeColor(BRAND).stroke();
-    doc.y += 10;
-    header();
-    for (const r of list) {
+  header();
+  {
+    for (const r of rooms) {
       const notes = [
         r.status === 'revisada' ? 'Ya revisada' : r.status === 'surtida' ? 'Ya surtida' : null,
         r.pending_checkout && 'Pendiente por salir',
