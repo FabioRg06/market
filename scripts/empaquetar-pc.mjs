@@ -1,5 +1,6 @@
-// Arma release/Market.exe para el PC de recepción: un solo archivo que trae adentro Node
-// portátil, el servidor y la vista de recepción ya compilada (ver scripts/pc/Market.cs).
+// Arma release/Market.exe, la aplicación de escritorio de recepción: un solo archivo que trae
+// adentro Node portátil, el servidor, la vista de recepción ya compilada y WebView2 para
+// mostrarla en su propia ventana (ver scripts/pc/Market.cs).
 //
 // Uso (desde la carpeta market/, en Windows):
 //   cd app && npm run build:web && cd ..
@@ -27,6 +28,23 @@ if (!fs.existsSync(path.join(root, 'app', 'dist', 'index.html')))
 if (!fs.existsSync(path.join(root, 'server', 'node_modules', 'express')))
   throw new Error('Faltan las librerías del servidor: corre "npm install" en server/.');
 
+// WebView2 (de Microsoft, en nuget.org): se descarga una vez y queda en .cache/.
+const WV2 = '1.0.4078.44';
+const wv2Dir = path.join(root, '.cache', `webview2-${WV2}`);
+const wv2 = {
+  core: path.join(wv2Dir, 'x', 'lib', 'net462', 'Microsoft.Web.WebView2.Core.dll'),
+  winforms: path.join(wv2Dir, 'x', 'lib', 'net462', 'Microsoft.Web.WebView2.WinForms.dll'),
+  loader: path.join(wv2Dir, 'x', 'runtimes', 'win-x64', 'native', 'WebView2Loader.dll'),
+};
+if (!fs.existsSync(wv2.core)) {
+  console.log(`Descargando WebView2 ${WV2} de nuget.org …`);
+  fs.mkdirSync(path.join(wv2Dir, 'x'), { recursive: true });
+  const res = await fetch(`https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/${WV2}/microsoft.web.webview2.${WV2}.nupkg`);
+  if (!res.ok) throw new Error(`No se pudo descargar WebView2 (${res.status}).`);
+  fs.writeFileSync(path.join(wv2Dir, 'pkg.zip'), Buffer.from(await res.arrayBuffer()));
+  execFileSync(path.join(process.env.WINDIR, 'System32', 'tar.exe'), ['-xf', path.join(wv2Dir, 'pkg.zip'), '-C', path.join(wv2Dir, 'x')]);
+}
+
 console.log('Limpiando release/ …');
 fs.rmSync(release, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
@@ -47,6 +65,10 @@ console.log('Copiando la vista de recepción …');
 copy('app/dist', 'app/dist');
 // El servidor crea los bloques, habitaciones y productos desde este catálogo.
 copy('app/src/catalog.json', 'app/src/catalog.json');
+
+console.log('Copiando WebView2 …');
+fs.mkdirSync(path.join(out, 'bin'));
+for (const dll of Object.values(wv2)) fs.copyFileSync(dll, path.join(out, 'bin', path.basename(dll)));
 
 // Excel de ejemplo para probar la carga de salidas.
 const require = createRequire(path.join(root, 'server', 'package.json'));
@@ -104,6 +126,9 @@ execFileSync(
     '/r:System.Windows.Forms.dll',
     '/r:System.IO.Compression.dll',
     '/r:System.IO.Compression.FileSystem.dll',
+    // Las copias de bin/: la ruta de .cache puede pasar el límite de 260 caracteres del csc.
+    `/r:${path.join(out, 'bin', 'Microsoft.Web.WebView2.Core.dll')}`,
+    `/r:${path.join(out, 'bin', 'Microsoft.Web.WebView2.WinForms.dll')}`,
     path.join(root, 'scripts', 'pc', 'Market.cs'),
     info,
   ],

@@ -4,3 +4,4 @@ app/dist/
 app/.expo/
 *.log
 release/
+.cache/
