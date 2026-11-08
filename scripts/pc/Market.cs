@@ -22,6 +22,15 @@ using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
+// Datos del programa (clic derecho en Market.exe → Propiedades → Detalles).
+[assembly: AssemblyTitle("Market")]
+[assembly: AssemblyProduct("Market · Recepción")]
+[assembly: AssemblyDescription("Market · control de minibar para recepción. Desarrollado por Pirelix.")]
+[assembly: AssemblyCompany("Pirelix")]
+[assembly: AssemblyCopyright("© 2026 Pirelix. Todos los derechos reservados.")]
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]
+
 static class Program
 {
     public const string Title = "Market · Recepción";
@@ -222,7 +231,7 @@ static class Program
                 t.InvokeMember("TargetPath", BindingFlags.SetProperty, null, lnk, new object[] { ExeInHome() });
                 t.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, lnk, new object[] { home });
                 t.InvokeMember("IconLocation", BindingFlags.SetProperty, null, lnk, new object[] { ExeInHome() + ",0" });
-                t.InvokeMember("Description", BindingFlags.SetProperty, null, lnk, new object[] { "Market · recepción del minibar" });
+                t.InvokeMember("Description", BindingFlags.SetProperty, null, lnk, new object[] { "Market · recepción del minibar. Desarrollado por Pirelix." });
                 t.InvokeMember("Save", BindingFlags.InvokeMethod, null, lnk, null);
             }
             catch { }
@@ -414,7 +423,7 @@ static class Tray
         var menu = new ContextMenuStrip();
         menu.Items.Add("Abrir recepción", null, delegate { Program.OpenBrowser(); });
         menu.Items.Add(new ToolStripSeparator());
-        var tray = new NotifyIcon { Icon = Program.AppIcon(), Text = "Market · recepción", ContextMenuStrip = menu, Visible = true };
+        var tray = new NotifyIcon { Icon = Program.AppIcon(), Text = "Market · desarrollado por Pirelix", ContextMenuStrip = menu, Visible = true };
         menu.Items.Add("Cerrar Market", null, delegate
         {
             tray.Visible = false;
@@ -435,7 +444,7 @@ class Splash : Form
     {
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.CenterScreen;
-        Size = new Size(380, 150);
+        Size = new Size(400, 170);
         BackColor = Color.FromArgb(11, 22, 64);
         ShowInTaskbar = true;
         Text = "Market";
@@ -456,9 +465,18 @@ class Splash : Form
             AutoSize = true,
             Location = new Point(30, 82),
         };
+        var by = new Label
+        {
+            Text = "Desarrollado por Pirelix",
+            ForeColor = Color.FromArgb(140, 160, 214),
+            Font = new Font("Segoe UI", 8.5f),
+            AutoSize = true,
+            Location = new Point(30, 130),
+        };
         var bar = new Panel { BackColor = Color.FromArgb(30, 64, 175), Dock = DockStyle.Bottom, Height = 5 };
         Controls.Add(title);
         Controls.Add(label);
+        Controls.Add(by);
         Controls.Add(bar);
     }
 
