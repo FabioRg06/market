@@ -5,6 +5,7 @@
 // Ojo: si alguien borra los datos del navegador se pierde lo que no se haya enviado.
 import type * as Native from './db.native';
 import type {
+  Worker,
   Block,
   Guest,
   Inspection,
@@ -24,9 +25,20 @@ import catalog from '../catalog.json';
 import { CATALOG_ROOMS } from '../rooms';
 
 type Dirty = { dirty: 0 | 1 };
+interface StoredRoom {
+  id: string;
+  number: string;
+  block_id: string;
+  type: RoomType;
+  sort: number;
+  active: number;
+}
 interface Store {
   meta: Record<string, string>;
-  blocks: Record<string, Pick<Block, 'id' | 'code' | 'name'>>;
+  blocks: Record<string, Pick<Block, 'id' | 'code' | 'name' | 'sort'>>;
+  /** Habitaciones: empiezan con el catálogo y después las manda el servidor. */
+  rooms: Record<string, StoredRoom>;
+  workers: Record<string, Worker>;
   roomTypes: Record<string, RoomType>;
   products: Record<string, Product>;
   typeInv: Record<string, number>; // "<tipo>:<producto>" → cantidad
@@ -39,9 +51,6 @@ interface Store {
 const KEY = 'market.db.v2';
 const KEEP_DAYS = 3; // el navegador guarda menos historia que la tablet
 
-const ROOMS = CATALOG_ROOMS.map(({ id, number, block_id }) => ({ id, number, block_id }));
-const CATALOG_TYPE = new Map(CATALOG_ROOMS.map((r) => [r.id, r.type]));
-const ROOM_BY_ID = new Map(ROOMS.map((r) => [r.id, r]));
 
 function empty(): Store {
   const products: Record<string, Product> = {};
@@ -50,14 +59,20 @@ function empty(): Store {
   for (const [type, items] of Object.entries(catalog.typeInventory))
     for (const [productId, qty] of Object.entries(items)) typeInv[`${type}:${productId}`] = qty;
   const blocks: Store['blocks'] = {};
-  for (const b of catalog.blocks) blocks[b.id] = { id: b.id, code: b.code, name: b.name };
-  return { meta: {}, blocks, roomTypes: {}, products, typeInv, guests: {}, inv: {}, insp: {}, items: {} };
+  catalog.blocks.forEach((b, i) => (blocks[b.id] = { id: b.id, code: b.code, name: b.name, sort: i + 1 }));
+  const rooms: Store['rooms'] = {};
+  for (const r of CATALOG_ROOMS) rooms[r.id] = { id: r.id, number: r.number, block_id: r.block_id, type: r.type, sort: r.sort, active: 1 };
+  return { meta: {}, blocks, rooms, workers: {}, roomTypes: {}, products, typeInv, guests: {}, inv: {}, insp: {}, items: {} };
 }
 
 function load(): Store {
   try {
     const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(KEY) : null;
-    if (raw) return { ...empty(), ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      // Versiones anteriores no guardaban las habitaciones: se toman del catálogo.
+      return { ...empty(), ...saved, rooms: saved.rooms && Object.keys(saved.rooms).length ? saved.rooms : empty().rooms };
+    }
   } catch {}
   return empty();
 }
@@ -71,7 +86,8 @@ function save() {
 }
 
 const invKey = (roomId: string, productId: string) => `${roomId}:${productId}`;
-const typeOf = (roomId: string): RoomType => st.roomTypes[roomId] ?? CATALOG_TYPE.get(roomId) ?? (catalog.defaultType as RoomType);
+const typeOf = (roomId: string): RoomType => st.rooms[roomId]?.type ?? (catalog.defaultType as RoomType);
+const activeRooms = () => Object.values(st.rooms).filter((r) => r.active).sort((a, b) => a.sort - b.sort);
 const sortedProducts = () => Object.values(st.products).filter((p) => p.active).sort((a, b) => a.sort - b.sort);
 const plain = ({ dirty, synced, ...i }: Inspection & Dirty & { synced?: 1 }): Inspection => i;
 
@@ -85,6 +101,8 @@ function itemsIndex() {
       name: st.products[it.product_id]?.name ?? it.product_id,
       quantity: it.quantity,
       unit_price: it.unit_price,
+      reason: it.reason ?? null,
+      expires_on: it.expires_on ?? null,
     });
   }
   return map;
@@ -100,10 +118,10 @@ function buildRows(roomIds: { id: string; number: string; block_id: string }[]):
   return roomIds.map((r) => {
     const list = by.get(r.id) ?? [];
     const pending = list
-      .filter((i) => i.finished_at && !i.restocked_at)
+      .filter((i) => i.finished_at && !i.restocked_at && i.kind !== 'cambio')
       .sort((a, b) => a.finished_at! - b.finished_at!)
-      .map((i) => ({ kind: i.kind, inspector: i.inspector, finished_at: i.finished_at!, items: items.get(i.id) ?? [] }));
-    const fin = Math.max(0, ...list.map((i) => i.finished_at ?? 0)) || null;
+      .map((i) => ({ kind: i.kind, charge: i.charge, inspector: i.inspector, finished_at: i.finished_at!, items: items.get(i.id) ?? [] }));
+    const fin = Math.max(0, ...list.filter((i) => i.kind !== 'cambio').map((i) => i.finished_at ?? 0)) || null;
     const res = Math.max(0, ...list.map((i) => i.restocked_at ?? 0)) || null;
     const g = st.guests[r.id];
     const b = st.blocks[r.block_id];
@@ -115,6 +133,10 @@ function buildRows(roomIds: { id: string; number: string; block_id: string }[]):
       guest_name: g?.guest_name ?? null,
       flight_time: g?.flight_time ?? null,
       review_at: g?.review_at ?? null,
+      worker_id: g?.worker_id ?? null,
+      worker_name: (g?.worker_id && st.workers[g.worker_id]?.active ? st.workers[g.worker_id].name : null) ?? null,
+      double_cycle: !!g?.double_cycle,
+      pending_checkout: !!g?.pending_checkout,
       ...roomState(g?.review_at ?? null, pending, list.some((i) => !i.finished_at), fin, res),
     };
   });
@@ -129,10 +151,13 @@ export const setMeta: typeof Native.setMeta = (key, value) => {
 };
 export const hasCatalog: typeof Native.hasCatalog = () => true;
 
-export const listRooms: typeof Native.listRooms = () => buildRows(ROOMS);
+export const listRooms: typeof Native.listRooms = () => buildRows(activeRooms());
+
+export const listWorkers: typeof Native.listWorkers = () =>
+  Object.values(st.workers).filter((w) => w.active).sort((a, b) => a.name.localeCompare(b.name));
 
 export const getRoom: typeof Native.getRoom = (roomId) => {
-  const r = ROOM_BY_ID.get(roomId);
+  const r = st.rooms[roomId];
   return r ? buildRows([r])[0] : null;
 };
 
@@ -143,6 +168,7 @@ export const getInventory: typeof Native.getInventory = (roomId) => {
       product_id: p.id,
       name: p.name,
       price: p.price,
+      presentation: p.presentation ?? null,
       image: p.image ?? null,
       quantity: st.inv[invKey(roomId, p.id)]?.quantity ?? st.typeInv[`${type}:${p.id}`] ?? 0,
     })
@@ -211,12 +237,26 @@ export const confirmNoConsumption: typeof Native.confirmNoConsumption = (roomId,
   finishInspection(startInspection(roomId, inspector, deviceId, 'confirmacion'), '');
 };
 
-export const setConsumed: typeof Native.setConsumed = (inspectionId, productId, quantity, unitPrice) => {
+export const setConsumed: typeof Native.setConsumed = (inspectionId, productId, quantity, unitPrice, change) => {
   const id = `${inspectionId}:${productId}`;
   st.items[id] = {
     id, inspection_id: inspectionId, product_id: productId, quantity: Math.max(0, quantity),
-    unit_price: unitPrice, updated_at: Date.now(), dirty: 1,
+    unit_price: unitPrice, reason: change?.reason ?? null, expires_on: change?.expires_on ?? null, updated_at: Date.now(), dirty: 1,
   };
+  save();
+};
+
+export const setInspectionCharge: typeof Native.setInspectionCharge = (id, charge) => {
+  const i = st.insp[id];
+  if (!i) return;
+  Object.assign(i, { charge: (charge as Inspection['charge']) ?? null, updated_at: Date.now(), dirty: 1 });
+  save();
+};
+
+export const setChangeDetails: typeof Native.setChangeDetails = (inspectionId, reason, expiresOn) => {
+  const now = Date.now();
+  for (const it of Object.values(st.items))
+    if (it.inspection_id === inspectionId) Object.assign(it, { reason, expires_on: expiresOn, unit_price: 0, updated_at: now, dirty: 1 });
   save();
 };
 
@@ -246,7 +286,7 @@ export const wasSynced: typeof Native.wasSynced = (id) => !!st.insp[id]?.synced;
 export const restockRoom: typeof Native.restockRoom = (roomId, by) => {
   const now = Date.now();
   for (const i of Object.values(st.insp))
-    if (i.room_id === roomId && i.finished_at && !i.restocked_at)
+    if (i.room_id === roomId && i.finished_at && !i.restocked_at && i.kind !== 'cambio')
       Object.assign(i, { restocked_at: now, restocked_by: by, updated_at: now, dirty: 1 });
   save();
 };
@@ -289,8 +329,10 @@ export const markClean: typeof Native.markClean = (sent) => {
 /** Guarda lo que llegó del servidor sin pisar cambios locales más nuevos. */
 export const applyPull: typeof Native.applyPull = (data) => {
   const minKeep = Date.now() - KEEP_DAYS * 24 * 60 * 60 * 1000;
-  for (const b of data.blocks) st.blocks[b.id] = { id: b.id, code: b.code, name: b.name };
-  for (const r of data.rooms) st.roomTypes[r.id] = r.type;
+  for (const b of data.blocks) st.blocks[b.id] = { id: b.id, code: b.code, name: b.name, sort: b.sort };
+  for (const w of data.workers ?? []) st.workers[w.id] = w;
+  for (const r of data.rooms)
+    st.rooms[r.id] = { id: r.id, number: r.number, block_id: r.block_id, type: r.type, sort: r.sort ?? 0, active: r.active };
   for (const p of data.products) st.products[p.id] = p;
   for (const t of data.type_inventory ?? []) st.typeInv[`${t.type}:${t.product_id}`] = t.quantity;
   for (const g of data.guests ?? []) st.guests[g.room_id] = g;

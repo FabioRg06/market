@@ -12,6 +12,7 @@ interface ProductRow {
   id: string;
   name: string;
   price: number;
+  presentation: string | null;
   image: string | null;
   active: number;
 }
@@ -19,7 +20,7 @@ interface ProductRow {
 export default function InventoryPanel() {
   const [products, setProducts] = useState<ProductRow[] | null>(null);
   const [typeInv, setTypeInv] = useState<Record<string, number>>({});
-  const [draft, setDraft] = useState<Record<string, { name: string; price: string }>>({});
+  const [draft, setDraft] = useState<Record<string, { name: string; price: string; presentation: string }>>({});
   const [type, setType] = useState<RoomType>('CM');
   const [qty, setQty] = useState<Record<string, number>>({});
   const [newName, setNewName] = useState('');
@@ -33,7 +34,7 @@ export default function InventoryPanel() {
         api.get<{ type: string; product_id: string; quantity: number }[]>('/api/type-inventory'),
       ]);
       setProducts(p);
-      setDraft(Object.fromEntries(p.map((x) => [x.id, { name: x.name, price: String(x.price) }])));
+      setDraft(Object.fromEntries(p.map((x) => [x.id, { name: x.name, price: String(x.price), presentation: x.presentation ?? '' }])));
       setTypeInv(Object.fromEntries(t.map((x) => [`${x.type}:${x.product_id}`, x.quantity])));
     } catch (e: any) {
       setMsg(`No se pudo cargar: ${e.message}`);
@@ -60,9 +61,11 @@ export default function InventoryPanel() {
   }
 
   async function savePrices() {
-    const changed = (products ?? []).filter((p) => draft[p.id].name.trim() !== p.name || Number(draft[p.id].price || 0) !== p.price);
+    const changed = (products ?? []).filter(
+      (p) => draft[p.id].name.trim() !== p.name || Number(draft[p.id].price || 0) !== p.price || draft[p.id].presentation.trim() !== (p.presentation ?? '')
+    );
     await run(
-      () => Promise.all(changed.map((p) => api.put(`/api/products/${p.id}`, { name: draft[p.id].name, price: Number(draft[p.id].price || 0) }))),
+      () => Promise.all(changed.map((p) => api.put(`/api/products/${p.id}`, { name: draft[p.id].name, price: Number(draft[p.id].price || 0), presentation: draft[p.id].presentation }))),
       changed.length ? `Se guardaron ${changed.length} productos.` : 'No había cambios.'
     );
   }
@@ -110,6 +113,13 @@ export default function InventoryPanel() {
                 style={{ flex: 1, paddingVertical: 8 }}
               />
               <Input
+                value={draft[p.id]?.presentation ?? ''}
+                onChangeText={(t) => setDraft((d) => ({ ...d, [p.id]: { ...d[p.id], presentation: t } }))}
+                placeholder="400 ml"
+                style={{ width: 90, paddingVertical: 8 }}
+                accessibilityLabel={`Presentación de ${p.name}`}
+              />
+              <Input
                 value={draft[p.id]?.price ?? ''}
                 onChangeText={(t) => setDraft((d) => ({ ...d, [p.id]: { ...d[p.id], price: t.replace(/\D/g, '') } }))}
                 keyboardType="numeric"
@@ -145,7 +155,7 @@ export default function InventoryPanel() {
               style={{ minHeight: 40 }}
             />
           </View>
-          <Btn title="Guardar nombres y precios" onPress={savePrices} style={{ marginTop: 8 }} />
+          <Btn title="Guardar productos" onPress={savePrices} style={{ marginTop: 8 }} />
         </View>
 
         {/* Inventario por tipo */}

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import NetInfo from '@react-native-community/netinfo';
 import { api } from '../api';
 import { getSettings } from '../settings';
+import { discoverServer } from '../discovery';
 import type { SyncPayload } from '../types';
 import * as local from './db';
 
@@ -50,10 +51,21 @@ export async function syncNow(): Promise<boolean> {
     return true;
   } catch (err: any) {
     setState({ online: false, error: err?.message ?? 'Error de conexión' });
+    lookForServer();
     return false;
   } finally {
     setState({ syncing: false, pending: local.pendingCount() });
   }
+}
+
+// Si no se llega al servidor, se busca solo en la red (como mucho una vez por minuto).
+let lastLook = 0;
+function lookForServer() {
+  if (Date.now() - lastLook < 60000) return;
+  lastLook = Date.now();
+  discoverServer().then((url) => {
+    if (url) syncNow();
+  });
 }
 
 let debounce: ReturnType<typeof setTimeout> | null = null;

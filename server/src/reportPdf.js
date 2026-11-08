@@ -1,7 +1,7 @@
 // Reporte del día en PDF, con el mismo orden del reporte en papel:
 // Sí / No (revisadas y sin revisar), Pendiente (lo que falta surtir), Novedades y el detalle.
 import PDFDocument from 'pdfkit';
-import { dayReport } from './reception.js';
+import { checkouts, dayReport } from './reception.js';
 
 const BRAND = '#1E40AF';
 const NAVY = '#0B1640';
@@ -9,7 +9,8 @@ const INK = '#0F172A';
 const MUTED = '#64748B';
 const LINE = '#DCE3F1';
 const RED = '#B42318';
-const KIND = { revision: 'Revisión', consumo: 'Consumo', novedad: 'Novedad', confirmacion: 'Confirmación' };
+const KIND = { revision: 'Revisión', consumo: 'Consumo', novedad: 'Novedad', confirmacion: 'Confirmación', cambio: 'Cambio' };
+const CHARGE = { post: 'Post', nap: 'NAP', no_reconocido: 'No reconocido' };
 
 const money = (v) => '$ ' + Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 const time = (ms) => (ms ? new Date(ms).toLocaleTimeString('es-CO', { hour12: false }) : '—');
@@ -97,14 +98,42 @@ export function writeDayReportPdf(range, stream) {
   const novedades = rep.reviewed.filter((i) => i.kind === 'novedad');
   heading('Novedades', novedades.length);
   list(
-    novedades.map((i) => [i.room_number, `${itemsText(i.items)} · posterior`, time(i.finished_at)]),
+    novedades.map((i) => [
+      i.room_number,
+      [`${CHARGE[i.charge] ?? 'Post'} · ${itemsText(i.items) || 'sin consumo'}`, i.notes && `Nota: ${i.notes}`].filter(Boolean).join('\n'),
+      time(i.finished_at),
+    ]),
     'Sin novedades.',
     RED
   );
 
+  const charged = rep.reviewed.filter((i) => i.charge && i.kind !== 'novedad');
+  if (charged.length) {
+    heading('Cobros', charged.length);
+    list(
+      charged.map((i) => [i.room_number, `${CHARGE[i.charge]} · ${itemsText(i.items) || 'sin consumo'}`, money(i.total)]),
+      '',
+      RED
+    );
+  }
+
+  heading('Cambios de producto', rep.changes.length);
+  list(
+    rep.changes.map((i) => [
+      i.room_number,
+      i.items.map((it) => `${it.quantity} ${it.name} · ${it.reason === 'danado' ? 'dañado' : 'vencido'}${it.expires_on ? ` (vence ${it.expires_on})` : ''}`).join(', '),
+      time(i.finished_at),
+    ]),
+    'Sin cambios.'
+  );
+
   heading('Sin revisar', rep.pendingReview.length);
   list(
-    rep.pendingReview.map((r) => [r.room_number, r.guest_name ?? '—', r.flight_time ? `vuelo ${r.flight_time}` : '']),
+    rep.pendingReview.map((r) => [
+      r.room_number,
+      [r.guest_name ?? '—', r.worker_name && `asignada a ${r.worker_name}`, r.pending_checkout && 'pendiente por salir'].filter(Boolean).join(' · '),
+      r.flight_time ? `vuelo ${r.flight_time}` : '',
+    ]),
     'No quedan habitaciones por revisar.'
   );
 
@@ -138,7 +167,7 @@ export function writeDayReportPdf(range, stream) {
     for (const i of rep.reviewed) {
       const cells = [
         i.room_number,
-        KIND[i.kind] ?? 'Revisión',
+        [KIND[i.kind] ?? 'Revisión', CHARGE[i.charge]].filter(Boolean).join(' · '),
         i.inspector,
         time(i.started_at),
         time(i.finished_at),
@@ -165,5 +194,94 @@ export function writeDayReportPdf(range, stream) {
   doc.y += 16;
   ensure(20);
   doc.font('Helvetica').fontSize(8).fillColor(MUTED).text(`Generado ${new Date().toLocaleString('es-CO', { hour12: false })}`, left, doc.y);
+  doc.end();
+}
+
+/** Lista de salidas para revisar ese día, agrupada por trabajador, con casilla para marcar. */
+export function writeCheckoutsPdf(range, stream) {
+  const rooms = checkouts(range);
+  const doc = new PDFDocument({ size: 'LETTER', margin: 40, info: { Title: 'Salidas a revisar · Market' } });
+  doc.pipe(stream);
+  const left = doc.page.margins.left;
+  const width = doc.page.width - left - doc.page.margins.right;
+  const bottom = () => doc.page.height - doc.page.margins.bottom;
+
+  doc.rect(0, 0, doc.page.width, 84).fill(NAVY);
+  doc.rect(0, 84, doc.page.width, 4).fill(BRAND);
+  doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(22).text('Salidas a revisar', left, 24, { lineBreak: false });
+  doc.font('Helvetica').fontSize(11).fillColor('#C7D3F5').text(dateText(range.from), left, 54, { lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(11).fillColor('#FFFFFF').text(`${rooms.length} habitaciones`, left, 30, { width, align: 'right', lineBreak: false });
+  doc.x = left;
+  doc.y = 108;
+
+  if (!rooms.length) {
+    doc.font('Helvetica').fontSize(11).fillColor(MUTED).text('No hay salidas para revisar este día.', left, doc.y);
+    doc.end();
+    return;
+  }
+
+  const cols = [
+    { label: '', w: 0.05 },
+    { label: 'Hab.', w: 0.1 },
+    { label: 'Tipo', w: 0.07 },
+    { label: 'Huésped', w: 0.3 },
+    { label: 'Vuelo', w: 0.1 },
+    { label: 'Observaciones', w: 0.38 },
+  ];
+  const header = () => {
+    const y = doc.y;
+    doc.rect(left, y - 3, width, 17).fill('#EDF1FA');
+    let x = left;
+    doc.font('Helvetica-Bold').fontSize(8).fillColor(MUTED);
+    for (const c of cols) {
+      doc.text(c.label.toUpperCase(), x + 4, y + 1, { width: c.w * width - 8, lineBreak: false });
+      x += c.w * width;
+    }
+    doc.y = y + 18;
+  };
+
+  const groups = new Map();
+  for (const r of rooms) {
+    const k = r.worker_name ?? 'Sin asignar';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+  for (const [worker, list] of groups) {
+    if (doc.y + 60 > bottom()) doc.addPage();
+    doc.font('Helvetica-Bold').fontSize(13).fillColor(INK).text(worker, left, doc.y, { continued: true });
+    doc.font('Helvetica').fillColor(MUTED).text(`  ${list.length}`);
+    doc.moveTo(left, doc.y + 3).lineTo(left + width, doc.y + 3).lineWidth(1).strokeColor(BRAND).stroke();
+    doc.y += 10;
+    header();
+    for (const r of list) {
+      const notes = [
+        r.status === 'revisada' ? 'Ya revisada' : r.status === 'surtida' ? 'Ya surtida' : null,
+        r.pending_checkout && 'Pendiente por salir',
+        r.double_cycle && 'Doble ciclo',
+      ].filter(Boolean).join(' · ');
+      const cells = [null, r.number, r.type, r.guest_name ?? '—', r.flight_time ?? '—', notes];
+      doc.font('Helvetica').fontSize(10);
+      const h = Math.max(20, ...cols.map((c, k) => (cells[k] ? doc.heightOfString(String(cells[k]), { width: c.w * width - 8 }) + 8 : 0)));
+      if (doc.y + h > bottom()) {
+        doc.addPage();
+        header();
+      }
+      const y = doc.y;
+      let x = left;
+      cols.forEach((c, k) => {
+        if (k === 0) doc.rect(x + 6, y + 4, 11, 11).lineWidth(1).strokeColor(MUTED).stroke();
+        else
+          doc
+            .font(k === 1 ? 'Helvetica-Bold' : 'Helvetica')
+            .fillColor(k === 5 ? MUTED : INK)
+            .text(String(cells[k]), x + 4, y + 5, { width: c.w * width - 8 });
+        x += c.w * width;
+      });
+      doc.moveTo(left, y + h).lineTo(left + width, y + h).lineWidth(0.5).strokeColor(LINE).stroke();
+      doc.y = y + h;
+    }
+    doc.y += 16;
+  }
+  doc.font('Helvetica').fontSize(8).fillColor(MUTED).text(`Generado ${new Date().toLocaleString('es-CO', { hour12: false })}`, left, Math.min(doc.y, bottom() - 12));
   doc.end();
 }

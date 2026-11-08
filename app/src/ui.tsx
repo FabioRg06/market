@@ -39,7 +39,6 @@ export const C = {
   status: {
     surtida: { tint: '#FFFFFF', border: '#DCE3F1', solid: '#94A3B8', ink: '#475569' },
     por_revisar: { tint: '#FFF8E1', border: '#F0D27A', solid: '#E0A800', ink: '#7A5A00' },
-    en_revision: { tint: '#EAF0FF', border: '#9DB4F2', solid: '#2F57D6', ink: '#1E3A9C' },
     revisada: { tint: '#E9F7EF', border: '#A8DDBE', solid: '#2E9E5B', ink: '#1B6B3E' },
   } as Record<RoomStatus, { tint: string; border: string; solid: string; ink: string }>,
 };

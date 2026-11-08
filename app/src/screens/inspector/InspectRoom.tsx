@@ -6,8 +6,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as local from '../../local/db';
 import { requestSync } from '../../local/sync';
 import type { Inspection, InventoryLine } from '../../types';
-import { KIND_LABEL, money, time } from '../../format';
-import { Btn, C, Confirm, Empty, ProductPicture, Receipt, Screen, tabular, TypeBadge } from '../../ui';
+import { KIND_LABEL, money, NOVEDAD_TYPES, time } from '../../format';
+import { Btn, C, Confirm, Empty, Input, ProductPicture, Receipt, Screen, tabular, TypeBadge } from '../../ui';
+
+/** "31/12/2026" → "2026-12-31" (o null si no es una fecha válida). */
+function parseDate(text: string): string | null {
+  const m = text.trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (!m) return null;
+  const [d, mo, y] = [Number(m[1]), Number(m[2]), Number(m[3].length === 2 ? `20${m[3]}` : m[3])];
+  const dt = new Date(y, mo - 1, d);
+  if (dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
 
 type Ask = null | 'finish' | 'none' | 'cancel' | 'leave';
 
@@ -22,6 +32,15 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
   const [consumed, setConsumed] = useState<Record<string, number>>(() => (insp ? local.getConsumption(insp.id) : {}));
   const [ask, setAsk] = useState<Ask>(null);
   const [gridW, setGridW] = useState(0);
+  // Cambio de producto: motivo y fecha de vencimiento.
+  const [reason, setReason] = useState<'vencido' | 'danado'>('vencido');
+  const [expiry, setExpiry] = useState('');
+  const [expiryError, setExpiryError] = useState(false);
+  const isChange = insp?.kind === 'cambio';
+  // Novedad: tipo y nota con la descripción.
+  const [novedadType, setNovedadType] = useState<'post' | 'no_reconocido' | 'nap'>('post');
+  const [note, setNote] = useState('');
+  const isNovedad = insp?.kind === 'novedad';
 
   // El botón "atrás" de Android no saca de la revisión: avisa que hay que terminarla.
   useEffect(() => {
@@ -43,7 +62,8 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
       setConsumed((c) => {
         const next = Math.max(0, Math.min(line.quantity, (c[line.product_id] ?? 0) + delta));
         if (next === (c[line.product_id] ?? 0)) return c;
-        local.setConsumed(insp!.id, line.product_id, next, line.price);
+        // En un cambio no se cobra: el producto se reemplaza.
+        local.setConsumed(insp!.id, line.product_id, next, insp!.kind === 'cambio' ? 0 : line.price);
         return { ...c, [line.product_id]: next };
       });
     },
@@ -60,7 +80,7 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
   }
 
   const units = Object.values(consumed).reduce((a, b) => a + b, 0);
-  const total = inventory.reduce((sum, l) => sum + (consumed[l.product_id] ?? 0) * l.price, 0);
+  const total = isChange ? 0 : inventory.reduce((sum, l) => sum + (consumed[l.product_id] ?? 0) * l.price, 0);
   const lines = inventory
     .filter((l) => (consumed[l.product_id] ?? 0) > 0)
     .map((l) => ({ product_id: l.product_id, name: l.name, quantity: consumed[l.product_id], unit_price: l.price }));
@@ -71,7 +91,16 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
     const action = ask;
     setAsk(null);
     if (action === 'leave') return setAsk('finish');
-    if (action === 'finish') local.finishInspection(insp!.id, '');
+    if (action === 'finish' && isChange) {
+      const iso = parseDate(expiry);
+      if (reason === 'vencido' && !iso) {
+        setExpiryError(true);
+        return setAsk('finish');
+      }
+      local.setChangeDetails(insp!.id, reason, iso);
+    }
+    if (action === 'finish' && isNovedad) local.setInspectionCharge(insp!.id, novedadType);
+    if (action === 'finish') local.finishInspection(insp!.id, isNovedad ? note : '');
     if (action === 'none') local.finishWithoutConsumption(insp!.id, '');
     if (action === 'cancel') local.cancelInspection(insp!.id);
     requestSync();
@@ -178,7 +207,7 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
             )}
           </View>
           <Btn
-            title={insp.kind === 'novedad' ? 'Guardar novedad' : insp.kind === 'consumo' ? 'Guardar consumo' : 'Terminar revisión'}
+            title={isChange ? 'Guardar cambio' : insp.kind === 'novedad' ? 'Guardar novedad' : insp.kind === 'consumo' ? 'Guardar consumo' : 'Terminar revisión'}
             disabled={units === 0}
             onPress={() => setAsk('finish')}
             style={{ flex: phone ? undefined : 1 }}
@@ -197,13 +226,91 @@ export default function InspectRoom({ inspectionId, onExit }: { inspectionId: st
       />
       <Confirm
         visible={ask === 'finish'}
-        title={insp.kind === 'novedad' ? '¿Guardar la novedad?' : insp.kind === 'consumo' ? '¿Guardar el consumo?' : '¿Terminar la revisión?'}
-        message={`${units} ${units === 1 ? 'producto' : 'productos'} · ${money(total)}\nEntrada ${time(insp.started_at)} · salida ${time(Date.now())}`}
-        confirmText="Terminar"
+        title={
+          isChange
+            ? '¿Guardar el cambio?'
+            : insp.kind === 'novedad'
+              ? '¿Guardar la novedad?'
+              : insp.kind === 'consumo'
+                ? '¿Guardar el consumo?'
+                : '¿Terminar la revisión?'
+        }
+        message={
+          isChange
+            ? `${units} ${units === 1 ? 'producto' : 'productos'} · cambio del ${new Date().toLocaleDateString('es-CO')}`
+            : `${units} ${units === 1 ? 'producto' : 'productos'} · ${money(total)}\nEntrada ${time(insp.started_at)} · salida ${time(Date.now())}`
+        }
+        confirmText={isChange ? 'Guardar cambio' : 'Terminar'}
         cancelText="Volver"
         onConfirm={confirm}
         onCancel={() => setAsk(null)}
-      />
+      >
+        {isNovedad && (
+          <View style={{ gap: 8 }}>
+            <Text style={{ fontSize: 13, fontWeight: '600', color: C.muted }}>Tipo de novedad</Text>
+            {NOVEDAD_TYPES.map((t) => (
+              <Pressable
+                key={t.key}
+                onPress={() => setNovedadType(t.key)}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: novedadType === t.key }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: 10,
+                  borderRadius: 10,
+                  borderWidth: 1.5,
+                  borderColor: novedadType === t.key ? C.danger : C.line,
+                  backgroundColor: novedadType === t.key ? '#FDECEC' : C.surface,
+                }}
+              >
+                <View
+                  style={{
+                    width: 16,
+                    height: 16,
+                    borderRadius: 8,
+                    borderWidth: 2,
+                    borderColor: novedadType === t.key ? C.danger : C.faint,
+                    backgroundColor: novedadType === t.key ? C.danger : 'transparent',
+                  }}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: C.ink }}>{t.label}</Text>
+                  <Text style={{ fontSize: 12, color: C.muted }}>{t.hint}</Text>
+                </View>
+              </Pressable>
+            ))}
+            <Input value={note} onChangeText={setNote} placeholder="Nota: describe la novedad (opcional)" multiline style={{ minHeight: 70, textAlignVertical: 'top' }} />
+          </View>
+        )}
+        {isChange && (
+          <View style={{ gap: 8 }}>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {(['vencido', 'danado'] as const).map((r) => (
+                <Btn
+                  key={r}
+                  title={r === 'vencido' ? 'Vencido' : 'Dañado'}
+                  variant={reason === r ? 'primary' : 'secondary'}
+                  onPress={() => setReason(r)}
+                  style={{ flex: 1, minHeight: 40 }}
+                />
+              ))}
+            </View>
+            <Input
+              value={expiry}
+              onChangeText={(t) => {
+                setExpiry(t);
+                setExpiryError(false);
+              }}
+              placeholder={reason === 'vencido' ? 'Fecha de vencimiento (dd/mm/aaaa)' : 'Fecha de vencimiento (opcional)'}
+              keyboardType="numbers-and-punctuation"
+              maxLength={10}
+            />
+            {expiryError && <Text style={{ color: C.danger, fontSize: 13 }}>Escribe la fecha de vencimiento como 31/12/2026.</Text>}
+          </View>
+        )}
+      </Confirm>
       <Confirm
         visible={ask === 'none'}
         title="¿Terminar sin consumo?"

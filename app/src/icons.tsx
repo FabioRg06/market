@@ -78,6 +78,17 @@ export function GridGlyph({ size = 20, color = '#334155' }: IconProps) {
   );
 }
 
+export function PeopleGlyph({ size = 20, color = '#334155' }: IconProps) {
+  return (
+    <Base size={size} color={color} strokeWidth={3.5}>
+      <Circle cx={18} cy={16} r={7} />
+      <Path d="M5 40c1-8 6-12 13-12s12 4 13 12" />
+      <Circle cx={33} cy={18} r={5} />
+      <Path d="M34 28c5 0 9 3 10 10" />
+    </Base>
+  );
+}
+
 export function ChartGlyph({ size = 20, color = '#334155' }: IconProps) {
   return (
     <Base size={size} color={color} strokeWidth={3.5}>

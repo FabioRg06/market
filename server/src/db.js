@@ -125,6 +125,29 @@ addColumn('products', 'image', 'TEXT');
 addColumn('guests', 'review_at', 'INTEGER');
 addColumn('inspections', 'kind', "TEXT NOT NULL DEFAULT 'revision'");
 addColumn('rooms', 'sort', 'INTEGER NOT NULL DEFAULT 0');
+// Bloques con series de habitaciones editables (JSON: [["C",101,122],["C",201,223]]).
+addColumn('blocks', 'ranges', 'TEXT');
+addColumn('blocks', 'sort', 'INTEGER NOT NULL DEFAULT 0');
+// Asignación a trabajador, doble ciclo y huésped que aún no sale.
+addColumn('guests', 'worker_id', 'TEXT');
+addColumn('guests', 'double_cycle', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('guests', 'pending_checkout', 'INTEGER NOT NULL DEFAULT 0');
+// Cobro: null (normal), 'nap' (no se acercó a pagar) o 'no_reconocido'.
+addColumn('inspections', 'charge', 'TEXT');
+// Cambio de producto: motivo (vencido/dañado) y fecha de vencimiento.
+addColumn('inspection_items', 'reason', 'TEXT');
+addColumn('inspection_items', 'expires_on', 'TEXT');
+addColumn('products', 'presentation', 'TEXT');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS workers (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    active     INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL,
+    rev        INTEGER NOT NULL
+  );
+`);
 
 export function nextRev() {
   const row = db.prepare(`SELECT value FROM meta WHERE key = 'rev'`).get();

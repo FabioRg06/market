@@ -5,26 +5,27 @@
 // `updated_at` más reciente, y todo es idempotente: reenviar lo mismo no duplica.
 import { db, nextRev, currentRev, transaction } from './db.js';
 
-const KINDS = new Set(['revision', 'consumo', 'novedad', 'confirmacion']);
+const KINDS = new Set(['revision', 'consumo', 'novedad', 'confirmacion', 'cambio']);
 
 const upsertInspection = db.prepare(`
   INSERT INTO inspections (id, room_id, inspector, device_id, kind, started_at, finished_at,
-                           restocked_at, restocked_by, notes, updated_at, rev)
+                           restocked_at, restocked_by, notes, charge, updated_at, rev)
   VALUES (:id, :room_id, :inspector, :device_id, :kind, :started_at, :finished_at,
-          :restocked_at, :restocked_by, :notes, :updated_at, :rev)
+          :restocked_at, :restocked_by, :notes, :charge, :updated_at, :rev)
   ON CONFLICT(id) DO UPDATE SET
     room_id = excluded.room_id, inspector = excluded.inspector, device_id = excluded.device_id,
     kind = excluded.kind, started_at = excluded.started_at, finished_at = excluded.finished_at,
     restocked_at = excluded.restocked_at, restocked_by = excluded.restocked_by,
-    notes = excluded.notes, updated_at = excluded.updated_at, rev = excluded.rev
+    notes = excluded.notes, updated_at = excluded.updated_at, rev = excluded.rev,
+    charge = COALESCE(excluded.charge, inspections.charge)
   WHERE excluded.updated_at >= inspections.updated_at
 `);
 
 const upsertItem = db.prepare(`
-  INSERT INTO inspection_items (id, inspection_id, product_id, quantity, unit_price, updated_at, rev)
-  VALUES (:id, :inspection_id, :product_id, :quantity, :unit_price, :updated_at, :rev)
+  INSERT INTO inspection_items (id, inspection_id, product_id, quantity, unit_price, reason, expires_on, updated_at, rev)
+  VALUES (:id, :inspection_id, :product_id, :quantity, :unit_price, :reason, :expires_on, :updated_at, :rev)
   ON CONFLICT(id) DO UPDATE SET
-    quantity = excluded.quantity, unit_price = excluded.unit_price,
+    quantity = excluded.quantity, unit_price = excluded.unit_price, reason = excluded.reason, expires_on = excluded.expires_on,
     updated_at = excluded.updated_at, rev = excluded.rev
   WHERE excluded.updated_at >= inspection_items.updated_at
 `);
@@ -48,7 +49,7 @@ export function applyPush(changes = {}, deviceId = null) {
     for (const row of changes.inspections ?? []) {
       upsertInspection.run({
         ...pick(row, ['id', 'room_id', 'inspector', 'started_at', 'finished_at',
-          'restocked_at', 'restocked_by', 'notes', 'updated_at']),
+          'restocked_at', 'restocked_by', 'notes', 'charge', 'updated_at']),
         kind: KINDS.has(row.kind) ? row.kind : 'revision',
         device_id: row.device_id ?? deviceId,
         rev: nextRev(),
@@ -56,7 +57,7 @@ export function applyPush(changes = {}, deviceId = null) {
     }
     for (const row of changes.inspection_items ?? []) {
       upsertItem.run({
-        ...pick(row, ['id', 'inspection_id', 'product_id', 'quantity', 'updated_at']),
+        ...pick(row, ['id', 'inspection_id', 'product_id', 'quantity', 'reason', 'expires_on', 'updated_at']),
         unit_price: row.unit_price ?? 0,
         rev: nextRev(),
       });
@@ -78,20 +79,21 @@ export function pullSince(since = 0) {
   const q = (sql, ...params) => db.prepare(sql).all(since, ...params);
   return {
     rev,
-    blocks: q(`SELECT id, code, name, updated_at FROM blocks WHERE rev > ?`),
+    blocks: q(`SELECT id, code, name, sort, updated_at FROM blocks WHERE rev > ?`),
+    workers: q(`SELECT id, name, active, updated_at FROM workers WHERE rev > ?`),
     rooms: q(`SELECT id, block_id, number, type, sort, active, updated_at FROM rooms WHERE rev > ?`),
-    products: q(`SELECT id, name, price, std_qty, sort, image, active, updated_at FROM products WHERE rev > ?`),
+    products: q(`SELECT id, name, price, presentation, std_qty, sort, image, active, updated_at FROM products WHERE rev > ?`),
     type_inventory: q(`SELECT type, product_id, quantity, updated_at FROM type_inventory WHERE rev > ?`),
-    guests: q(`SELECT room_id, guest_name, flight_time, review_at, updated_at FROM guests WHERE rev > ?`),
+    guests: q(`SELECT room_id, guest_name, flight_time, review_at, worker_id, double_cycle, pending_checkout, updated_at FROM guests WHERE rev > ?`),
     room_inventory: q(`SELECT room_id, product_id, quantity, updated_at FROM room_inventory WHERE rev > ?`),
     inspections: q(
       `SELECT id, room_id, inspector, device_id, kind, started_at, finished_at, restocked_at,
-              restocked_by, notes, updated_at
+              restocked_by, notes, charge, updated_at
          FROM inspections WHERE rev > ? AND started_at >= ?`,
       minStarted
     ),
     inspection_items: q(
-      `SELECT ii.id, ii.inspection_id, ii.product_id, ii.quantity, ii.unit_price, ii.updated_at
+      `SELECT ii.id, ii.inspection_id, ii.product_id, ii.quantity, ii.unit_price, ii.reason, ii.expires_on, ii.updated_at
          FROM inspection_items ii JOIN inspections i ON i.id = ii.inspection_id
         WHERE ii.rev > ? AND i.started_at >= ?`,
       minStarted

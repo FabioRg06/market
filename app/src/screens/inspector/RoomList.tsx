@@ -27,17 +27,23 @@ export default function RoomList({
   const [asking, setAsking] = useState<RoomRow | null>(null);
   const [actions, setActions] = useState<RoomRow | null>(null);
   const [needName, setNeedName] = useState(false);
+  const [noMinibar, setNoMinibar] = useState<RoomRow | null>(null);
+  const [workerId, setWorkerId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setRooms(local.listRooms());
     setPending(local.pendingRoomIds());
   }, []);
   useEffect(load, [load, sync.version, sync.pending]);
+  useEffect(() => {
+    getSettings().then((st) => setWorkerId(st.workerId));
+  }, [sync.version]);
 
   const onRoomPress = useCallback(
     (room: RoomRow) => {
       const open = local.getAnyOpenInspection();
       if (open) return onOpenInspection(open.id); // hay una revisión sin terminar: primero esa
+      if (room.type === 'SM') return setNoMinibar(room);
       if (room.status === 'revisada') return setActions(room);
       setAsking(room);
     },
@@ -80,7 +86,7 @@ export default function RoomList({
 
   return (
     <Screen>
-      <RoomGrid rooms={rooms} onPress={onRoomPress} pendingIds={pending} reserveRight={52} />
+      <RoomGrid rooms={rooms} onPress={onRoomPress} pendingIds={pending} reserveRight={52} mineWorkerId={workerId} />
       {/* Ajustes: botón flotante en la esquina, por encima de las habitaciones. */}
       <Pressable
         onPress={onSettings}
@@ -97,15 +103,31 @@ export default function RoomList({
         title={`¿Revisar la habitación ${asking?.number ?? ''}?`}
         message={
           asking
-            ? [asking.guest_name, asking.flight_time && `vuelo ${asking.flight_time}`, TYPE_BY_CODE[asking.type]?.name]
+            ? [
+                [asking.guest_name, asking.flight_time && `vuelo ${asking.flight_time}`, TYPE_BY_CODE[asking.type]?.name].filter(Boolean).join(' · '),
+                asking.pending_checkout && 'El huésped todavía no ha salido.',
+                asking.double_cycle && 'Doble ciclo: se revisa dos veces.',
+              ]
                 .filter(Boolean)
-                .join(' · ')
+                .join('\n')
             : undefined
         }
         confirmText="Revisar"
         cancelText="Cancelar"
         onConfirm={() => start(asking!, 'revision')}
         onCancel={() => setAsking(null)}
+      >
+        <Btn title="Cambio de producto (vencido o dañado)" variant="quiet" onPress={() => start(asking!, 'cambio')} />
+      </Confirm>
+
+      <Confirm
+        visible={!!noMinibar}
+        title={`La ${noMinibar?.number ?? ''} no tiene minibar`}
+        message="Está marcada como Sin minibar (SM): no hay nada que revisar."
+        confirmText="Entendido"
+        cancelText="Cerrar"
+        onConfirm={() => setNoMinibar(null)}
+        onCancel={() => setNoMinibar(null)}
       />
 
       <Modal visible={!!actions} transparent animationType="fade" onRequestClose={() => setActions(null)}>
@@ -128,7 +150,8 @@ export default function RoomList({
                 <Btn title="Agregar consumo" variant="secondary" onPress={() => start(actions, 'consumo')} style={{ flex: 1 }} />
                 <Btn title="Reportar novedad" variant="secondary" onPress={() => start(actions, 'novedad')} style={{ flex: 1 }} />
               </View>
-              <Text style={st.hint}>Consumo: el huésped sigue en la habitación. Novedad: el huésped ya salió.</Text>
+              <Text style={st.hint}>Consumo: el huésped sigue en la habitación. Novedad: post, no reconocido o no se acercó a pagar.</Text>
+              <Btn title="Cambio de producto (vencido o dañado)" variant="secondary" onPress={() => start(actions, 'cambio')} />
               <Btn title="Marcar surtida" variant={actions.needs_confirm ? 'secondary' : 'primary'} onPress={() => restock(actions)} />
               <Btn title="Cerrar" variant="quiet" onPress={() => setActions(null)} />
             </Pressable>

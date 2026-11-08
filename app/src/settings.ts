@@ -7,6 +7,8 @@ import { uuid } from './uuid';
 export interface Settings {
   serverUrl: string;
   inspectorName: string;
+  /** Trabajador elegido en la tablet (sus habitaciones asignadas). */
+  workerId: string | null;
   deviceId: string;
 }
 
@@ -33,6 +35,7 @@ export async function getSettings(): Promise<Settings> {
   cache = {
     serverUrl: stored.serverUrl || defaultServerUrl(),
     inspectorName: stored.inspectorName ?? '',
+    workerId: stored.workerId ?? null,
     deviceId: stored.deviceId || uuid(),
   };
   if (!stored.deviceId) await saveSettings({});

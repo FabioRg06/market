@@ -47,7 +47,6 @@ export function duration(from: number, to: number | null) {
 export const STATUS_LABEL: Record<RoomStatus, string> = {
   surtida: 'Surtida',
   por_revisar: 'Por revisar',
-  en_revision: 'En revisión',
   revisada: 'Revisada',
 };
 
@@ -56,7 +55,18 @@ export const KIND_LABEL: Record<InspectionKind, string> = {
   consumo: 'Consumo adicional',
   novedad: 'Novedad',
   confirmacion: 'Confirmación sin consumo',
+  cambio: 'Cambio de producto',
 };
+
+export const CHARGE_LABEL: Record<string, string> = { post: 'Post', nap: 'NAP', no_reconocido: 'No reconocido' };
+
+/** Tipos de novedad, en el orden en que se ofrecen. */
+export const NOVEDAD_TYPES: { key: 'post' | 'no_reconocido' | 'nap'; label: string; hint: string }[] = [
+  { key: 'post', label: 'Post', hint: 'Consumo hallado después de la salida' },
+  { key: 'no_reconocido', label: 'No reconocido', hint: 'El huésped no reconoce el consumo' },
+  { key: 'nap', label: 'No se acercó a pagar', hint: 'NAP' },
+];
+export const REASON_LABEL: Record<string, string> = { vencido: 'Vencido', danado: 'Dañado' };
 
 export const ROOM_TYPES = catalog.types as { code: RoomType; name: string; color: string; ink: string }[];
 export const TYPE_BY_CODE = Object.fromEntries(ROOM_TYPES.map((t) => [t.code, t])) as Record<
@@ -66,6 +76,7 @@ export const TYPE_BY_CODE = Object.fromEntries(ROOM_TYPES.map((t) => [t.code, t]
 
 interface PendingInspection {
   kind: InspectionKind;
+  charge?: string | null;
   inspector: string;
   finished_at: number;
   items: LineItem[];
@@ -75,6 +86,10 @@ interface PendingInspection {
  * Estado de una habitación (mismas reglas que server/src/reception.js → summarize).
  * `pending` = revisiones terminadas que aún no se surten, en orden de cuando terminaron.
  */
+/** Las novedades NAP o no reconocido no se vuelven a surtir: el consumo ya se contó en la revisión. */
+export const restocks = (i: { kind: string; charge?: string | null }) =>
+  !(i.kind === 'novedad' && (i.charge === 'nap' || i.charge === 'no_reconocido'));
+
 export function roomState(
   reviewAt: number | null,
   pending: PendingInspection[],
@@ -84,6 +99,7 @@ export function roomState(
 ): RoomState {
   const missing = new Map<string, LineItem>();
   for (const i of pending)
+    if (restocks(i))
     for (const it of i.items) {
       if (it.quantity <= 0) continue;
       const m = missing.get(it.product_id) ?? { ...it, quantity: 0 };
@@ -92,8 +108,7 @@ export function roomState(
     }
   const missingList = [...missing.values()];
   let status: RoomStatus = 'surtida';
-  if (hasOpen) status = 'en_revision';
-  else if (reviewAt && (!lastFinishedAt || lastFinishedAt < reviewAt)) status = 'por_revisar';
+  if (reviewAt && (!lastFinishedAt || lastFinishedAt < reviewAt)) status = 'por_revisar';
   else if (pending.length) status = 'revisada';
   const last = pending[pending.length - 1];
   const units = missingList.reduce((s, m) => s + m.quantity, 0);
@@ -105,8 +120,9 @@ export function roomState(
     reviewed_at: last?.finished_at ?? null,
     reviewed_by: last?.inspector ?? null,
     restocked_at: lastRestockAt,
-    needs_confirm: status === 'revisada' && units === 0 && !pending.some((i) => i.kind === 'confirmacion'),
+    needs_confirm: status === 'revisada' && units === 0 && !pending.some((i) => i.kind === 'confirmacion' || !restocks(i)),
     has_novedad: pending.some((i) => i.kind === 'novedad'),
+    charges: [...new Set(pending.map((i) => i.charge).filter(Boolean))] as RoomState['charges'],
   };
 }
 

@@ -6,7 +6,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { api } from '../../api';
 import type { InspectionWithItems, InventoryLine, RoomRow } from '../../types';
-import { dayLabel, duration, KIND_LABEL, money, ROOM_TYPES, STATUS_LABEL, time, TYPE_BY_CODE } from '../../format';
+import { CHARGE_LABEL, dayLabel, duration, KIND_LABEL, NOVEDAD_TYPES, REASON_LABEL, money, ROOM_TYPES, STATUS_LABEL, time, TYPE_BY_CODE } from '../../format';
 import { Btn, C, Empty, Input, ProductPicture, Receipt, s, Stepper, tabular } from '../../ui';
 import { ChevronGlyph, PencilGlyph } from '../../icons';
 
@@ -33,6 +33,9 @@ export default function RoomDetail({
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  // Registrar desde recepción: revisión, novedad o consumo adicional.
+  const [entry, setEntry] = useState<null | 'revision' | 'novedad' | 'consumo'>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -84,13 +87,59 @@ export default function RoomDetail({
                 {STATUS_LABEL[r.status]}
                 {r.needs_confirm ? ' · falta confirmar' : ''}
               </Text>
-              {r.has_novedad && <Text style={{ fontSize: 13, fontWeight: '700', color: C.danger }}>· Novedad</Text>}
+              {r.has_novedad && !(r.charges ?? []).length && <Text style={{ fontSize: 13, fontWeight: '700', color: C.danger }}>· Novedad</Text>}
+              {(r.charges ?? []).map((ch) => (
+                <Text key={ch} style={{ fontSize: 13, fontWeight: '700', color: C.danger }}>
+                  · {CHARGE_LABEL[ch]}
+                </Text>
+              ))}
             </View>
             <Text style={{ fontSize: 20, fontWeight: '700', color: r.guest_name ? C.ink : C.faint }} numberOfLines={1}>
               {r.guest_name ?? 'Sin huésped'}
             </Text>
-            <Text style={[{ fontSize: 14, color: C.muted }, tabular]}>Vuelo {r.flight_time ?? '—'}</Text>
+            <Text style={[{ fontSize: 14, color: C.muted }, tabular]}>
+              Vuelo {r.flight_time ?? '—'}
+              {r.worker_name ? <Text style={{ color: C.brand, fontWeight: '700' }}>{` · ${r.worker_name}`}</Text> : null}
+            </Text>
+            {(r.double_cycle || r.pending_checkout) && (
+              <View style={[s.row, { gap: 6, marginTop: 4 }]}>
+                {r.pending_checkout && <Tag text="Pendiente por salir" color="#C77D12" />}
+                {r.double_cycle && <Tag text="Doble ciclo" color={C.brand} />}
+              </View>
+            )}
           </View>
+        )}
+
+        {!editing && !entry && r.type !== 'SM' && (
+          <View style={[s.row, { gap: 8 }]}>
+            {r.status === 'revisada' ? (
+              <>
+                <Btn title="Registrar novedad" onPress={() => setEntry('novedad')} style={{ flex: 1, minHeight: 42 }} />
+                <Btn title="Agregar consumo" variant="secondary" onPress={() => setEntry('consumo')} style={{ flex: 1, minHeight: 42 }} />
+              </>
+            ) : (
+              <Btn title="Revisar desde recepción" onPress={() => setEntry('revision')} style={{ flex: 1, minHeight: 42 }} />
+            )}
+          </View>
+        )}
+
+        {notice && (
+          <Pressable onPress={() => setNotice(null)} style={st.notice} accessibilityRole="alert">
+            <Text style={st.noticeText}>✓ {notice}</Text>
+          </Pressable>
+        )}
+
+        {entry && (
+          <Entry
+            kind={entry}
+            inventory={data.inventory}
+            onCancel={() => setEntry(null)}
+            onSave={async (body, label) => {
+              await act(() => api.post(`/api/rooms/${roomId}/inspections`, { ...body, kind: entry }));
+              setEntry(null);
+              setNotice(label);
+            }}
+          />
         )}
 
         {r.status === 'revisada' && (
@@ -102,7 +151,7 @@ export default function RoomDetail({
           >
             {editing ? (
               data.inspections
-                .filter((i) => i.finished_at && !i.restocked_at)
+                .filter((i) => i.finished_at && !i.restocked_at && i.kind !== 'cambio')
                 .map((i) => <EditItems key={i.id} inspection={i} inventory={data.inventory} onSave={act} />)
             ) : (
               <Receipt
@@ -135,9 +184,9 @@ export default function RoomDetail({
         {data.inspections.map((i) => (
           <Fold
             key={i.id}
-            title={`${KIND_LABEL[i.kind] ?? 'Revisión'} · ${dayLabel(i.started_at)} ${time(i.started_at)}`}
-            right={i.units ? money(i.total) : 'Sin consumo'}
-            danger={i.kind === 'novedad'}
+            title={`${KIND_LABEL[i.kind] ?? 'Revisión'}${i.charge ? ` · ${CHARGE_LABEL[i.charge]}` : ''} · ${dayLabel(i.started_at)} ${time(i.started_at)}`}
+            right={i.kind === 'cambio' ? `${i.units} u` : i.units ? money(i.total) : 'Sin consumo'}
+            danger={i.kind === 'novedad' || !!i.charge}
             open={!!open[i.id]}
             onPress={() => toggle(i.id)}
           >
@@ -146,7 +195,8 @@ export default function RoomDetail({
               subtitle={`${time(i.started_at)} – ${i.finished_at ? time(i.finished_at) : 'en curso'}${
                 i.finished_at ? ` · ${duration(i.started_at, i.finished_at)}` : ''
               }${i.restocked_at ? ` · surtida ${time(i.restocked_at)}` : ''}`}
-              lines={i.items}
+              footer={i.notes ? <Text style={st.note}>Nota: {i.notes}</Text> : undefined}
+              lines={i.kind === 'cambio' ? i.items.map((it) => ({ ...it, name: `${it.name} · ${REASON_LABEL[it.reason ?? ''] ?? 'Cambio'}${it.expires_on ? ` (vence ${it.expires_on})` : ''}` })) : i.items}
             />
           </Fold>
         ))}
@@ -155,10 +205,119 @@ export default function RoomDetail({
   );
 }
 
-/** Edición de huésped, vuelo, tipo y "por revisar". */
+/** Registrar desde recepción lo que se encontró en la habitación. */
+function Entry({
+  kind,
+  inventory,
+  onCancel,
+  onSave,
+}: {
+  kind: 'revision' | 'novedad' | 'consumo';
+  inventory: InventoryLine[];
+  onCancel: () => void;
+  onSave: (body: { items: { product_id: string; quantity: number }[]; charge?: string; notes?: string }, label: string) => Promise<void>;
+}) {
+  const [qty, setQty] = useState<Record<string, number>>({});
+  const [type, setType] = useState<'post' | 'no_reconocido' | 'nap'>('post');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const items = Object.entries(qty)
+    .filter(([, q]) => q > 0)
+    .map(([product_id, quantity]) => ({ product_id, quantity }));
+  const total = inventory.reduce((t, l) => t + (qty[l.product_id] ?? 0) * l.price, 0);
+  const title = kind === 'novedad' ? 'Registrar novedad' : kind === 'consumo' ? 'Agregar consumo' : 'Revisar desde recepción';
+
+  async function save(empty = false) {
+    setSaving(true);
+    try {
+      await onSave(
+        { items: empty ? [] : items, ...(kind === 'novedad' ? { charge: type, notes: note } : note.trim() ? { notes: note } : {}) },
+        kind === 'novedad' ? 'Novedad registrada' : kind === 'consumo' ? 'Consumo agregado' : 'Revisada'
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <View style={[st.card, { gap: 10, borderColor: C.brand, borderWidth: 1.5 }]}>
+      <Text style={{ fontSize: 16, fontWeight: '800', color: C.ink }}>{title}</Text>
+      {inventory.map((l) => (
+        <View key={l.product_id} style={[s.row, { gap: 10 }]}>
+          <View style={st.thumb}>
+            <ProductPicture id={l.product_id} image={l.image} size={24} fill shrink={/pequeñ/i.test(l.name) ? 0.65 : 1} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 14, color: C.ink }} numberOfLines={1}>
+              {l.name}
+            </Text>
+            <Text style={[{ fontSize: 12, color: C.muted }, tabular]}>
+              {money(l.price)} · hay {l.quantity}
+            </Text>
+          </View>
+          <Stepper value={qty[l.product_id] ?? 0} max={l.quantity} onChange={(v) => setQty((q) => ({ ...q, [l.product_id]: v }))} />
+        </View>
+      ))}
+      {kind === 'novedad' && (
+        <View style={{ gap: 6 }}>
+          <Text style={s.label}>Tipo de novedad</Text>
+          <View style={[s.row, { gap: 6, flexWrap: 'wrap' }]}>
+            {NOVEDAD_TYPES.map((t) => (
+              <Pressable
+                key={t.key}
+                onPress={() => setType(t.key)}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: type === t.key }}
+                style={[st.typeOpt, type === t.key && { borderColor: C.danger, backgroundColor: '#FDECEC' }]}
+              >
+                <Text style={{ fontSize: 13, fontWeight: type === t.key ? '700' : '500', color: type === t.key ? C.danger : C.body }}>{t.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      )}
+      <Input
+        value={note}
+        onChangeText={setNote}
+        placeholder={kind === 'novedad' ? 'Nota: describe la novedad' : 'Nota (opcional)'}
+        multiline
+        style={{ minHeight: 64, textAlignVertical: 'top' }}
+      />
+      <View style={[s.row, { justifyContent: 'space-between' }]}>
+        <Text style={{ fontSize: 13, color: C.muted }}>{items.reduce((t, i) => t + i.quantity, 0)} productos</Text>
+        <Text style={[{ fontSize: 16, fontWeight: '800', color: C.ink }, tabular]}>{money(total)}</Text>
+      </View>
+      <View style={[s.row, { gap: 8, flexWrap: 'wrap' }]}>
+        <Btn title="Cancelar" variant="quiet" onPress={onCancel} style={{ minHeight: 42 }} />
+        <View style={{ flex: 1 }} />
+        {kind === 'revision' && <Btn title="Sin consumo" variant="secondary" disabled={saving || items.length > 0} onPress={() => save(true)} style={{ minHeight: 42 }} />}
+        <Btn
+          title={kind === 'revision' ? 'Marcar revisada' : 'Guardar'}
+          disabled={saving || (kind !== 'revision' && items.length === 0) || (kind === 'revision' && items.length === 0)}
+          onPress={() => save()}
+          style={{ minHeight: 42 }}
+        />
+      </View>
+    </View>
+  );
+}
+
+function Tag({ text, color }: { text: string; color: string }) {
+  return (
+    <View style={{ borderRadius: 999, borderWidth: 1, borderColor: color, paddingHorizontal: 8, paddingVertical: 2 }}>
+      <Text style={{ fontSize: 11, fontWeight: '700', color }}>{text}</Text>
+    </View>
+  );
+}
+
+/** Edición de huésped, vuelo, trabajador, banderas, tipo y "por revisar". */
 function EditRoom({ room, onSave }: { room: RoomRow; onSave: (fn: () => Promise<unknown>) => Promise<void> }) {
   const [guest, setGuest] = useState(room.guest_name ?? '');
   const [flight, setFlight] = useState(room.flight_time ?? '');
+  const [workers, setWorkers] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    api.get<{ id: string; name: string }[]>('/api/workers').then(setWorkers).catch(() => {});
+  }, []);
   const flightOk = !flight.trim() || TIME_RE.test(flight.trim());
   const put = (body: object) => onSave(() => api.put(`/api/rooms/${room.id}/guest`, body));
 
@@ -168,6 +327,41 @@ function EditRoom({ room, onSave }: { room: RoomRow; onSave: (fn: () => Promise<
       <Input value={flight} onChangeText={setFlight} placeholder="Vuelo (14:30)" keyboardType="numbers-and-punctuation" maxLength={5} />
       {!flightOk && <Text style={{ color: C.danger }}>Escribe la hora como 14:30.</Text>}
       <Btn title="Guardar huésped" disabled={!flightOk} onPress={() => put({ guest_name: guest, flight_time: flight })} />
+      {workers.length > 0 && (
+        <View style={{ gap: 6 }}>
+          <Text style={s.label}>Revisa</Text>
+          <View style={[s.row, { gap: 6, flexWrap: 'wrap' }]}>
+            {[{ id: '', name: 'Nadie' }, ...workers].map((w) => {
+              const on = (room.worker_id ?? '') === w.id;
+              return (
+                <Pressable
+                  key={w.id || 'none'}
+                  onPress={() => !on && put({ worker_id: w.id || null })}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  style={[st.typeOpt, on && { borderColor: C.brand, backgroundColor: '#EEF2FF' }]}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: on ? '700' : '500', color: on ? C.brand : C.body }}>{w.name}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      )}
+      <View style={[s.row, { gap: 8 }]}>
+        <Btn
+          title={room.pending_checkout ? '✓ Pendiente por salir' : 'Pendiente por salir'}
+          variant={room.pending_checkout ? 'primary' : 'secondary'}
+          onPress={() => put({ pending_checkout: !room.pending_checkout })}
+          style={{ flex: 1, minHeight: 40 }}
+        />
+        <Btn
+          title={room.double_cycle ? '✓ Doble ciclo' : 'Doble ciclo'}
+          variant={room.double_cycle ? 'primary' : 'secondary'}
+          onPress={() => put({ double_cycle: !room.double_cycle })}
+          style={{ flex: 1, minHeight: 40 }}
+        />
+      </View>
       <View style={[s.row, { gap: 6, flexWrap: 'wrap' }]}>
         {ROOM_TYPES.map((t) => (
           <Pressable
@@ -208,6 +402,24 @@ function EditItems({
       <Text style={{ fontSize: 13, color: C.muted }}>
         {KIND_LABEL[inspection.kind] ?? 'Revisión'} · {inspection.inspector} · {time(inspection.finished_at)}
       </Text>
+      <View style={[s.row, { gap: 6, flexWrap: 'wrap', marginBottom: 4 }]}>
+        {(inspection.kind === 'novedad' ? (['post', 'no_reconocido', 'nap'] as const) : ([null, 'nap', 'no_reconocido'] as const)).map((ch) => {
+          const on = (inspection.charge ?? null) === ch;
+          return (
+            <Pressable
+              key={ch ?? 'normal'}
+              onPress={() => !on && onSave(() => api.put(`/api/inspections/${inspection.id}/charge`, { charge: ch }))}
+              accessibilityRole="button"
+              accessibilityState={{ selected: on }}
+              style={[st.typeOpt, on && { borderColor: ch ? C.danger : C.brand, backgroundColor: ch ? '#FDECEC' : '#EEF2FF' }]}
+            >
+              <Text style={{ fontSize: 13, fontWeight: on ? '700' : '500', color: on ? (ch ? C.danger : C.brand) : C.body }}>
+                {ch ? CHARGE_LABEL[ch] : 'Cobro normal'}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
       {products.map((p) => (
         <View key={p.product_id} style={[s.row, { justifyContent: 'space-between' }]}>
           <Text style={{ flex: 1, fontSize: 14, color: (qty[p.product_id] ?? 0) > 0 ? C.ink : C.faint }}>{p.name}</Text>
@@ -331,6 +543,9 @@ const st = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
+  notice: { backgroundColor: '#E9F7EF', borderColor: '#A8DDBE', borderWidth: 1, borderRadius: 10, padding: 12 },
+  noticeText: { color: '#1B6B3E', fontWeight: '700', fontSize: 14 },
+  note: { fontSize: 13, color: C.body, fontStyle: 'italic' },
   typeOpt: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1.5, borderColor: C.line, alignItems: 'center' },
   iconBtn: {
     width: 34,

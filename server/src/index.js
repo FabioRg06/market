@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { applyPush, pullSince } from './sync.js';
 import * as reception from './reception.js';
 import { ensureCatalog } from './seed.js';
-import { writeDayReportPdf } from './reportPdf.js';
+import { writeCheckoutsPdf, writeDayReportPdf } from './reportPdf.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 4000);
@@ -19,7 +19,7 @@ app.use(express.json({ limit: '20mb' }));
 app.use((req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*');
   res.set('Access-Control-Allow-Headers', 'Content-Type');
-  res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS');
+  res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -33,7 +33,8 @@ function range(req) {
   return { from, to };
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, time: Date.now() }));
+// `app` permite que las tablets encuentren solas este servidor en la red.
+app.get('/api/health', (_req, res) => res.json({ ok: true, app: 'market', time: Date.now() }));
 
 // ---- Sincronización (tablets) ----
 app.post('/api/sync', (req, res) => {
@@ -62,6 +63,41 @@ app.put('/api/inspections/:id/items', (req, res) => {
 app.put('/api/rooms/:id/guest', (req, res) => {
   reception.setGuest(req.params.id, req.body ?? {});
   res.json({ ok: true });
+});
+
+// ---- Trabajadores ----
+app.get('/api/workers', (_req, res) => res.json(reception.workers()));
+
+app.post('/api/workers', (req, res) => {
+  const name = String(req.body?.name ?? '').trim();
+  if (!name) return res.status(400).json({ error: 'Falta el nombre' });
+  res.json({ id: reception.createWorker(name) });
+});
+
+app.put('/api/workers/:id', (req, res) => {
+  const name = String(req.body?.name ?? '').trim();
+  if (!name) return res.status(400).json({ error: 'Falta el nombre' });
+  res.json({ ok: reception.updateWorker(req.params.id, { name }) });
+});
+
+app.delete('/api/workers/:id', (req, res) => res.json({ ok: reception.deleteWorker(req.params.id) }));
+
+app.put('/api/assign', (req, res) => {
+  res.json({ ok: reception.assignRooms(req.body?.worker_id ?? null, req.body?.room_ids ?? []) });
+});
+
+app.post('/api/rooms/:id/inspections', (req, res) => {
+  const id = reception.createInspection(req.params.id, req.body ?? {});
+  if (!id) return res.status(400).json({ error: 'No se pudo registrar' });
+  res.json({ id });
+});
+
+app.put('/api/inspections/:id/notes', (req, res) => {
+  res.json({ ok: reception.setNotes(req.params.id, req.body?.notes ?? null) });
+});
+
+app.put('/api/inspections/:id/charge', (req, res) => {
+  res.json({ ok: reception.setCharge(req.params.id, req.body?.charge ?? null) });
 });
 
 app.put('/api/rooms/:id/type', (req, res) => {
@@ -93,13 +129,14 @@ app.get('/api/report.pdf', (req, res) => {
   writeDayReportPdf(range(req), res);
 });
 
-app.get('/api/report.csv', (req, res) => {
+// Lista en PDF de las salidas que hay que revisar ese día, por trabajador.
+app.get('/api/salidas.pdf', (req, res) => {
   const { from } = range(req);
   const d = new Date(from);
-  const name = `reporte-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.csv`;
-  res.set('Content-Type', 'text/csv; charset=utf-8');
-  res.set('Content-Disposition', `attachment; filename="${name}"`);
-  res.send(reception.dayReportCsv(range(req)));
+  const name = `salidas-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.pdf`;
+  res.set('Content-Type', 'application/pdf');
+  res.set('Content-Disposition', `inline; filename="${name}"`);
+  writeCheckoutsPdf(range(req), res);
 });
 
 // ---- Inventario global y por tipo ----
@@ -123,6 +160,14 @@ app.put('/api/type-inventory/:type', (req, res) => {
 
 // ---- Bloques ----
 app.get('/api/blocks', (_req, res) => res.json(reception.blocks()));
+
+app.post('/api/blocks', (req, res) => {
+  const code = String(req.body?.code ?? '').trim();
+  if (!code) return res.status(400).json({ error: 'Falta el código' });
+  const id = reception.createBlock(req.body);
+  if (!id) return res.status(400).json({ error: 'Ya existe un bloque con ese código' });
+  res.json({ id });
+});
 
 app.put('/api/blocks/:id', (req, res) => {
   res.json({ ok: reception.updateBlock(req.params.id, req.body ?? {}) });

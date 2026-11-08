@@ -25,7 +25,7 @@ transaction(() => {
   db.exec(`DELETE FROM inspection_items WHERE inspection_id IN (SELECT id FROM inspections WHERE finished_at IS NULL)`);
   db.exec(`DELETE FROM inspections WHERE finished_at IS NULL`);
   for (const { room_id } of db.prepare(`SELECT room_id FROM guests`).all())
-    setGuest(room_id, { guest_name: null, flight_time: null, review: false });
+    setGuest(room_id, { guest_name: null, flight_time: null, review: false, worker_id: null, double_cycle: false, pending_checkout: false });
 
   const rooms = db.prepare(`SELECT id FROM rooms WHERE active = 1 ORDER BY RANDOM() LIMIT ?`).all(count);
   for (const { id } of rooms)

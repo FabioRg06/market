@@ -1,34 +1,20 @@
 {
   "blocks": [
     {
-      "id": "c100",
-      "code": "C100",
-      "name": "C 100",
+      "id": "c",
+      "code": "C",
+      "name": "C",
       "ranges": [
         [
           "C",
           101,
           122
-        ]
-      ]
-    },
-    {
-      "id": "c200",
-      "code": "C200",
-      "name": "C 200",
-      "ranges": [
+        ],
         [
           "C",
           201,
           223
-        ]
-      ]
-    },
-    {
-      "id": "c300",
-      "code": "C300",
-      "name": "C 300",
-      "ranges": [
+        ],
         [
           "C",
           301,
@@ -86,46 +72,25 @@
       ]
     },
     {
-      "id": "bw100",
-      "code": "BW100",
-      "name": "BW 100",
+      "id": "bw",
+      "code": "BW",
+      "name": "BW",
       "ranges": [
         [
           "BW",
           101,
           168
-        ]
-      ]
-    },
-    {
-      "id": "bw200",
-      "code": "BW200",
-      "name": "BW 200",
-      "ranges": [
+        ],
         [
           "BW",
           201,
           280
-        ]
-      ]
-    },
-    {
-      "id": "bw300",
-      "code": "BW300",
-      "name": "BW 300",
-      "ranges": [
+        ],
         [
           "BW",
           301,
           374
-        ]
-      ]
-    },
-    {
-      "id": "bw400",
-      "code": "BW400",
-      "name": "BW 400",
-      "ranges": [
+        ],
         [
           "BW",
           401,
@@ -134,22 +99,16 @@
       ]
     },
     {
-      "id": "r700",
-      "code": "R700",
-      "name": "R 700",
+      "id": "r",
+      "code": "R",
+      "name": "Ranchería",
+      "defaultType": "SS",
       "ranges": [
         [
           "R",
           701,
           742
-        ]
-      ]
-    },
-    {
-      "id": "r800",
-      "code": "R800",
-      "name": "R 800",
-      "ranges": [
+        ],
         [
           "R",
           801,
@@ -175,6 +134,12 @@
       "code": "CM",
       "name": "Con minibar",
       "color": "#2E9E5B",
+      "ink": "#FFFFFF"
+    },
+    {
+      "code": "SN",
+      "name": "Solo nevera",
+      "color": "#3AA6D9",
       "ink": "#FFFFFF"
     },
     {
@@ -206,87 +171,98 @@
   "products": [
     {
       "id": "agua",
-      "name": "Agua",
-      "price": 5000,
-      "sort": 1
+      "name": "Agua Brisa",
+      "price": 6000,
+      "sort": 1,
+      "presentation": "600 ml"
     },
     {
       "id": "cocacola",
       "name": "Coca-Cola",
-      "price": 6000,
-      "sort": 2
+      "price": 7500,
+      "sort": 2,
+      "presentation": "400 ml"
     },
     {
       "id": "gatorade",
       "name": "Gatorade",
-      "price": 7000,
-      "sort": 3
+      "price": 11000,
+      "sort": 3,
+      "presentation": "500 ml"
     },
     {
       "id": "hit",
       "name": "Jugo Hit",
-      "price": 5000,
-      "sort": 4
+      "price": 8000,
+      "sort": 4,
+      "presentation": "600 ml"
+    },
+    {
+      "id": "club_colombia",
+      "name": "Club Colombia",
+      "presentation": "330 ml",
+      "price": 9500,
+      "sort": 5
     },
     {
       "id": "detodito_g",
       "name": "Detodito grande",
       "price": 9000,
-      "sort": 5
+      "sort": 6
     },
     {
       "id": "detodito_p",
       "name": "Detodito pequeño",
       "price": 5000,
-      "sort": 6
+      "sort": 7
     },
     {
       "id": "mani_g",
       "name": "Maní grande",
       "price": 7000,
-      "sort": 7
+      "sort": 8
     },
     {
       "id": "mani_p",
       "name": "Maní pequeño",
       "price": 4000,
-      "sort": 8
+      "sort": 9
     },
     {
       "id": "salchichas",
       "name": "Lata de salchichas",
       "price": 9000,
-      "sort": 9
+      "sort": 10
     },
     {
       "id": "crema",
       "name": "Crema dental",
       "price": 8000,
-      "sort": 10
+      "sort": 11
     },
     {
       "id": "cepillo",
       "name": "Cepillo de dientes",
       "price": 6000,
-      "sort": 11
+      "sort": 12
     },
     {
       "id": "shampoo",
       "name": "Shampoo",
       "price": 5000,
-      "sort": 12
+      "sort": 13
     },
     {
       "id": "preservativo",
       "name": "Preservativo",
       "price": 8000,
-      "sort": 13
+      "sort": 14
     }
   ],
   "typeInventory": {
     "CM": {
-      "agua": 2,
-      "cocacola": 2,
+      "agua": 5,
+      "cocacola": 1,
       "gatorade": 2,
       "hit": 1,
       "detodito_g": 1,
@@ -297,7 +273,8 @@
       "crema": 1,
       "cepillo": 1,
       "shampoo": 2,
-      "preservativo": 1
+      "preservativo": 1,
+      "club_colombia": 6
     },
     "SS": {
       "detodito_g": 1,
@@ -306,11 +283,7 @@
       "mani_p": 1,
       "salchichas": 1
     },
-    "SM": {
-      "crema": 1,
-      "cepillo": 1,
-      "shampoo": 2
-    },
+    "SM": {},
     "PR": {
       "agua": 2,
       "detodito_p": 1,
@@ -332,7 +305,15 @@
       "crema": 1,
       "cepillo": 2,
       "shampoo": 2,
-      "preservativo": 2
+      "preservativo": 2,
+      "club_colombia": 6
+    },
+    "SN": {
+      "agua": 5,
+      "cocacola": 1,
+      "gatorade": 2,
+      "hit": 1,
+      "club_colombia": 6
     }
   },
   "roomTypes": {

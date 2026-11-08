@@ -1,22 +1,23 @@
-// Reporte del día: revisadas, sin revisar, surtidas y lo que falta surtir. Se descarga en PDF
-// (y también en CSV, que abre en Excel).
+// Reporte del día: revisadas, sin revisar, surtidas y lo que falta surtir. Se descarga en PDF,
+// junto con la lista en PDF de las salidas que hay que revisar.
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { api } from '../../api';
 import { getSettings } from '../../settings';
 import type { InspectionWithItems, RoomType } from '../../types';
-import { dayLabel, dayRange, duration, KIND_LABEL, money, time } from '../../format';
+import { CHARGE_LABEL, dayLabel, dayRange, duration, KIND_LABEL, money, REASON_LABEL, time } from '../../format';
 import { Btn, C, Empty, s, tabular, TypeBadge } from '../../ui';
 import { openUrl } from '../../webfile';
 
 const DAY = 24 * 60 * 60 * 1000;
 
 interface Report {
-  counts: { revisadas: number; por_revisar: number; por_surtir: number; surtidas: number; novedades: number; total: number };
+  counts: { nap: number; no_reconocido: number; cambios: number; revisadas: number; por_revisar: number; por_surtir: number; surtidas: number; novedades: number; total: number };
   reviewed: (InspectionWithItems & { room_type: RoomType })[];
   restocked: { room_id: string; room_number: string; block_code: string; restocked_at: number; restocked_by: string }[];
   pendingReview: { room_id: string; room_number: string; block_code: string; guest_name: string | null; flight_time: string | null }[];
   pendingRestock: { room_id: string; room_number: string; block_code: string; units: number; total: number }[];
+  changes: (InspectionWithItems & { room_type: RoomType })[];
 }
 
 export default function ReportPanel({ onOpenRoom }: { onOpenRoom: (roomId: string) => void }) {
@@ -50,13 +51,13 @@ export default function ReportPanel({ onOpenRoom }: { onOpenRoom: (roomId: strin
         <Text style={{ fontSize: 17, fontWeight: '700', color: C.ink, minWidth: 110, textAlign: 'center' }}>{dayLabel(day)}</Text>
         <Btn title="›" variant="secondary" disabled={isToday} onPress={() => setDay(Math.min(Date.now(), day + DAY))} style={{ minHeight: 40, paddingHorizontal: 14 }} />
         <View style={{ flex: 1 }} />
-        <Btn title="Descargar PDF" onPress={download} style={{ minHeight: 40 }} />
         <Btn
-          title="Excel"
+          title="Salidas a revisar (PDF)"
           variant="secondary"
-          onPress={async () => openUrl(`${(await getSettings()).serverUrl}/api/report.csv?from=${from}&to=${to}`)}
+          onPress={async () => openUrl(`${(await getSettings()).serverUrl}/api/salidas.pdf?from=${from}&to=${to}`)}
           style={{ minHeight: 40 }}
         />
+        <Btn title="Reporte del día (PDF)" onPress={download} style={{ minHeight: 40 }} />
       </View>
 
       {error && <Text style={{ color: C.danger }}>No se pudo cargar el reporte ({error}).</Text>}
@@ -64,12 +65,13 @@ export default function ReportPanel({ onOpenRoom }: { onOpenRoom: (roomId: strin
         <Empty text="Cargando…" />
       ) : (
         <>
-          <View style={[s.row, { flexWrap: 'wrap', gap: 10 }]}>
+          <View style={[s.row, { gap: 8 }]}>
             <Count label="Revisadas" value={rep.counts.revisadas} color={C.status.revisada.solid} />
             <Count label="Sin revisar" value={rep.counts.por_revisar} color={C.status.por_revisar.solid} />
             <Count label="Surtidas" value={rep.counts.surtidas} color={C.status.surtida.solid} />
             <Count label="Falta surtir" value={rep.counts.por_surtir} color={C.status.revisada.ink} />
             <Count label="Novedades" value={rep.counts.novedades} color={C.danger} />
+            <Count label="Cambios" value={rep.counts.cambios} color={C.brand} />
             <Count label="Consumo" value={money(rep.counts.total)} />
           </View>
 
@@ -79,9 +81,12 @@ export default function ReportPanel({ onOpenRoom }: { onOpenRoom: (roomId: strin
               <Row key={i.id} onPress={() => onOpenRoom(i.room_id)}>
                 <Text style={[cell.room, tabular]}>{i.room_number}</Text>
                 <TypeBadge type={i.room_type} />
-                <Text style={[cell.kind, i.kind === 'novedad' && { color: C.danger }]}>{KIND_LABEL[i.kind] ?? 'Revisión'}</Text>
+                <Text style={[cell.kind, (i.kind === 'novedad' || i.charge) && { color: C.danger }]}>
+                  {KIND_LABEL[i.kind] ?? 'Revisión'}
+                  {i.charge ? ` · ${CHARGE_LABEL[i.charge]}` : ''}
+                </Text>
                 <Text style={[cell.text, { flex: 2 }]} numberOfLines={1}>
-                  {i.units ? i.items.map((it) => `${it.quantity} ${it.name}`).join(', ') : 'Sin consumo'}
+                  {i.units ? i.items.map((it) => `${it.quantity} ${it.name}`).join(', ') : 'Sin consumo'}{i.notes ? ` · Nota: ${i.notes}` : ''}
                 </Text>
                 <Text style={[cell.muted, tabular]}>
                   {i.inspector} · {time(i.started_at)}–{time(i.finished_at)} · {duration(i.started_at, i.finished_at)}
@@ -98,6 +103,21 @@ export default function ReportPanel({ onOpenRoom }: { onOpenRoom: (roomId: strin
                 <Text style={[cell.room, tabular]}>{r.room_number}</Text>
                 <Text style={[cell.text, { flex: 2 }]}>{r.guest_name ?? 'Sin huésped'}</Text>
                 <Text style={[cell.muted, tabular]}>Vuelo {r.flight_time ?? '—'}</Text>
+              </Row>
+            ))}
+          </Section>
+
+          <Section title={`Cambios de producto (${rep.changes.length})`}>
+            {rep.changes.length === 0 && <Empty text="No hubo cambios de producto este día." />}
+            {rep.changes.map((i) => (
+              <Row key={i.id} onPress={() => onOpenRoom(i.room_id)}>
+                <Text style={[cell.room, tabular]}>{i.room_number}</Text>
+                <Text style={[cell.text, { flex: 2 }]} numberOfLines={2}>
+                  {i.items.map((it) => `${it.quantity} ${it.name} · ${REASON_LABEL[it.reason ?? ''] ?? 'Cambio'}${it.expires_on ? ` (vence ${it.expires_on})` : ''}`).join(', ')}
+                </Text>
+                <Text style={[cell.muted, tabular]}>
+                  {i.inspector} · {time(i.finished_at)}
+                </Text>
               </Row>
             ))}
           </Section>
@@ -131,12 +151,17 @@ export default function ReportPanel({ onOpenRoom }: { onOpenRoom: (roomId: strin
 
 function Count({ label, value, color = C.ink }: { label: string; value: number | string; color?: string }) {
   return (
-    <View style={{ backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.line, paddingHorizontal: 14, paddingVertical: 10, minWidth: 130 }}>
+    // Todas las casillas en una sola fila: se reparten el ancho por igual.
+    <View style={{ flex: 1, flexBasis: 0, minWidth: 0, backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.line, paddingHorizontal: 12, paddingVertical: 10 }}>
       <View style={[s.row, { gap: 6 }]}>
-        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
-        <Text style={s.muted}>{label}</Text>
+        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color, flexShrink: 0 }} />
+        <Text style={[s.muted, { flexShrink: 1 }]} numberOfLines={1}>
+          {label}
+        </Text>
       </View>
-      <Text style={[{ fontSize: 22, fontWeight: '700', color: C.ink, marginTop: 2 }, tabular]}>{value}</Text>
+      <Text style={[{ fontSize: 20, fontWeight: '700', color: C.ink, marginTop: 2 }, tabular]} numberOfLines={1}>
+        {value}
+      </Text>
     </View>
   );
 }

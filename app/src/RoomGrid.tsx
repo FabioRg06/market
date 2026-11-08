@@ -8,21 +8,30 @@ import type { RoomRow, RoomStatus } from './types';
 import { STATUS_LABEL } from './format';
 import { Btn, C, Empty, s, tabular, TypeBadge } from './ui';
 import { CloudPending, DoorGlyph, FilterGlyph, SearchGlyph } from './icons';
-import catalog from './catalog.json';
 
 const CARD_H = 118;
 const GAP = 10;
-const STATUSES: RoomStatus[] = ['por_revisar', 'en_revision', 'revisada', 'surtida'];
+const STATUSES: RoomStatus[] = ['por_revisar', 'revisada', 'surtida'];
 
-/** Filtros: los cuatro estados más dos marcas de las revisadas. */
-type Filter = RoomStatus | 'por_confirmar' | 'novedad';
+/** Filtros: los estados, dos marcas de las revisadas y las de cada habitación. */
+type Filter = RoomStatus | 'por_confirmar' | 'novedad' | 'por_salir' | 'doble_ciclo';
 const FILTERS: { key: Filter; label: string; color: string; ring: string }[] = [
   ...STATUSES.map((st) => ({ key: st as Filter, label: STATUS_LABEL[st], color: C.status[st].tint, ring: C.status[st].solid })),
   { key: 'por_confirmar', label: 'Por confirmar', color: C.status.revisada.tint, ring: C.status.revisada.ink },
   { key: 'novedad', label: 'Con novedad', color: '#FDECEC', ring: C.danger },
+  { key: 'por_salir', label: 'Pendiente por salir', color: '#FFF4E5', ring: '#C77D12' },
+  { key: 'doble_ciclo', label: 'Doble ciclo', color: '#EEF2FE', ring: C.brand },
 ];
 const matches = (r: RoomRow, f: Filter) =>
-  f === 'por_confirmar' ? r.needs_confirm : f === 'novedad' ? r.has_novedad : r.status === f;
+  f === 'por_confirmar'
+    ? r.needs_confirm
+    : f === 'novedad'
+      ? r.has_novedad
+      : f === 'por_salir'
+        ? r.pending_checkout
+        : f === 'doble_ciclo'
+          ? r.double_cycle
+          : r.status === f;
 const NO_PENDING = new Set<string>();
 
 export default function RoomGrid({
@@ -31,6 +40,8 @@ export default function RoomGrid({
   selectedId,
   pendingIds = NO_PENDING,
   reserveRight = 0,
+  mineWorkerId = null,
+  showWorker = false,
   emptyText = 'Ninguna habitación coincide con el filtro.',
 }: {
   rooms: RoomRow[];
@@ -39,12 +50,18 @@ export default function RoomGrid({
   pendingIds?: Set<string>;
   /** Espacio a la derecha de la búsqueda para un botón flotante (la tuerca). */
   reserveRight?: number;
+  /** Quien revisa: con su trabajador aparece "Mis habitaciones" (activo al abrir). */
+  mineWorkerId?: string | null;
+  /** Recepción: la tarjeta muestra a quién está asignada. */
+  showWorker?: boolean;
   emptyText?: string;
 }) {
   const [width, setWidth] = useState(0);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<Filter | null>(null);
   const [block, setBlock] = useState<string | null>(null);
+  const [mine, setMine] = useState(true);
+  const onlyMine = !!mineWorkerId && mine;
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const counts = useMemo(() => {
@@ -53,22 +70,24 @@ export default function RoomGrid({
     return c;
   }, [rooms, block]);
 
-  // Recepción puede renombrar el código de un bloque: se toma el que llega con las habitaciones.
-  const blockCodes = useMemo(() => {
+  // Bloques en el orden de sus habitaciones, con el código que manda el servidor.
+  const blockList = useMemo(() => {
     const m = new Map<string, string>();
-    for (const r of rooms) if (r.block_code && !m.has(r.block_id)) m.set(r.block_id, r.block_code);
-    return m;
+    for (const r of rooms) if (!m.has(r.block_id)) m.set(r.block_id, r.block_code ?? r.block_name);
+    return [...m.entries()].map(([id, code]) => ({ id, code }));
   }, [rooms]);
+  const mineCount = useMemo(() => (mineWorkerId ? rooms.filter((r) => r.worker_id === mineWorkerId).length : 0), [rooms, mineWorkerId]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rooms.filter(
       (r) =>
+        (!onlyMine || r.worker_id === mineWorkerId) &&
         (!status || matches(r, status)) &&
         (!block || r.block_id === block) &&
         (!q || r.number.toLowerCase().includes(q.replace(/\s/g, '')) || (r.guest_name ?? '').toLowerCase().includes(q))
     );
-  }, [rooms, query, status, block]);
+  }, [rooms, query, status, block, onlyMine, mineWorkerId]);
 
   const phone = width > 0 && width < 600;
   const pad = phone ? 12 : 20;
@@ -103,9 +122,10 @@ export default function RoomGrid({
         </Pressable>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+        {mineWorkerId ? <Tab label={`Mis habitaciones · ${mineCount}`} active={onlyMine} onPress={() => setMine(!mine)} /> : null}
         <Tab label="Todos" active={!block} onPress={() => setBlock(null)} />
-        {catalog.blocks.map((b) => (
-          <Tab key={b.id} label={blockCodes.get(b.id) ?? b.code} active={block === b.id} onPress={() => setBlock(block === b.id ? null : b.id)} />
+        {blockList.map((b) => (
+          <Tab key={b.id} label={b.code} active={block === b.id} onPress={() => setBlock(block === b.id ? null : b.id)} />
         ))}
       </ScrollView>
       {status && (
@@ -142,6 +162,7 @@ export default function RoomGrid({
               width={cardW}
               selected={item.id === selectedId}
               pending={pendingIds.has(item.id)}
+              showWorker={showWorker}
               onPress={press}
             />
           )}
@@ -204,12 +225,14 @@ export const RoomCard = memo(function RoomCard({
   width,
   selected,
   pending,
+  showWorker,
   onPress,
 }: {
   room: RoomRow;
   width: number;
   selected?: boolean;
   pending?: boolean;
+  showWorker?: boolean;
   onPress: (r: RoomRow) => void;
 }) {
   const c = C.status[room.status];
@@ -234,6 +257,8 @@ export const RoomCard = memo(function RoomCard({
         <TypeBadge type={room.type} />
         <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
           {room.needs_confirm && <Flag text="Confirmar" color={c.ink} />}
+          {room.pending_checkout && <Flag text="Por salir" color="#C77D12" />}
+          {room.double_cycle && <Flag text="2 ciclos" color={C.brand} />}
           {pending && <CloudPending size={15} color={C.muted} />}
         </View>
       </View>
@@ -244,9 +269,14 @@ export const RoomCard = memo(function RoomCard({
       <Text style={[g.guest, !room.guest_name && { color: C.faint }]} numberOfLines={1}>
         {room.guest_name ?? 'Sin huésped'}
       </Text>
-      <Text style={g.flight} numberOfLines={1}>
-        Vuelo <Text style={[g.flightTime, tabular]}>{room.flight_time ?? '—'}</Text>
-      </Text>
+      {room.type === 'SM' ? (
+        <Text style={[g.flight, { fontWeight: '600' }]}>Sin minibar</Text>
+      ) : (
+        <Text style={g.flight} numberOfLines={1}>
+          Vuelo <Text style={[g.flightTime, tabular]}>{room.flight_time ?? '—'}</Text>
+          {showWorker && room.worker_name ? <Text style={g.worker}>{` · ${room.worker_name}`}</Text> : null}
+        </Text>
+      )}
     </Pressable>
   );
 });
@@ -331,4 +361,5 @@ const g = StyleSheet.create({
   guest: { fontSize: 13, fontWeight: '500', color: C.body, maxWidth: '100%' },
   flight: { fontSize: 12, color: C.muted },
   flightTime: { fontWeight: '600', color: C.body },
+  worker: { fontWeight: '700', color: C.brand },
 });

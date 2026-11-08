@@ -1,19 +1,32 @@
 /**
- * surtida → por_revisar (llegó en el Excel de salidas) → en_revision → revisada (con o sin
- * consumo, hasta que la surtan) → surtida.
+ * surtida → por_revisar (llegó en el Excel de salidas) → revisada (con o sin consumo,
+ * hasta que la surtan) → surtida.
  */
-export type RoomStatus = 'surtida' | 'por_revisar' | 'en_revision' | 'revisada';
+export type RoomStatus = 'surtida' | 'por_revisar' | 'revisada';
 
-/** revision: la normal · consumo: el huésped sigue y consumió más · novedad: consumo hallado
- *  después de que el huésped se fue · confirmacion: se volvió a revisar y no faltaba nada. */
-export type InspectionKind = 'revision' | 'consumo' | 'novedad' | 'confirmacion';
+/** revision: la normal · consumo: el huésped sigue y consumió más · novedad (post): consumo
+ *  hallado después de que el huésped se fue · confirmacion: se volvió a revisar y no faltaba
+ *  nada · cambio: se reemplazó un producto vencido o dañado (no afecta el estado ni se cobra). */
+export type InspectionKind = 'revision' | 'consumo' | 'novedad' | 'confirmacion' | 'cambio';
 
-export type RoomType = 'CM' | 'SS' | 'SM' | 'PR' | 'VIP';
+/** Tipo de novedad o cobro: post (consumo hallado tras la salida), NAP (no se acercó a
+ *  pagar) o consumo no reconocido. */
+export type Charge = 'post' | 'nap' | 'no_reconocido';
+
+export type RoomType = 'CM' | 'SN' | 'SS' | 'SM' | 'PR' | 'VIP';
+
+export interface Worker {
+  id: string;
+  name: string;
+  active: number;
+  updated_at: number;
+}
 
 export interface Block {
   id: string;
   code: string | null;
   name: string;
+  sort?: number;
   updated_at: number;
 }
 
@@ -31,6 +44,7 @@ export interface Product {
   id: string;
   name: string;
   price: number;
+  presentation?: string | null;
   std_qty: number;
   sort: number;
   image: string | null;
@@ -51,6 +65,9 @@ export interface Guest {
   flight_time: string | null;
   /** Cuándo se marcó "por revisar" (Excel de salidas). */
   review_at: number | null;
+  worker_id?: string | null;
+  double_cycle?: number;
+  pending_checkout?: number;
   updated_at: number;
 }
 
@@ -72,6 +89,7 @@ export interface Inspection {
   restocked_at: number | null;
   restocked_by: string | null;
   notes: string | null;
+  charge?: Charge | null;
   updated_at: number;
 }
 
@@ -81,6 +99,8 @@ export interface InspectionItem {
   product_id: string;
   quantity: number;
   unit_price: number;
+  reason?: string | null;
+  expires_on?: string | null;
   updated_at: number;
 }
 
@@ -89,6 +109,9 @@ export interface LineItem {
   name: string;
   quantity: number;
   unit_price: number;
+  /** Solo en cambios: 'vencido' | 'danado' y fecha de vencimiento (AAAA-MM-DD). */
+  reason?: string | null;
+  expires_on?: string | null;
 }
 
 /** Inspección con sus consumos (la usan ambas vistas). */
@@ -114,6 +137,7 @@ export interface RoomState {
   /** Revisada sin consumo: falta confirmarla cuando el huésped salga. */
   needs_confirm: boolean;
   has_novedad: boolean;
+  charges?: Charge[];
 }
 
 export interface RoomRow extends RoomState {
@@ -126,12 +150,17 @@ export interface RoomRow extends RoomState {
   guest_name: string | null;
   flight_time: string | null;
   review_at: number | null;
+  worker_id: string | null;
+  worker_name: string | null;
+  double_cycle: boolean;
+  pending_checkout: boolean;
 }
 
 export interface InventoryLine {
   product_id: string;
   name: string;
   price: number;
+  presentation?: string | null;
   image: string | null;
   quantity: number;
 }
@@ -139,6 +168,7 @@ export interface InventoryLine {
 export interface SyncPayload {
   rev: number;
   blocks: Block[];
+  workers?: Worker[];
   rooms: Room[];
   products: Product[];
   type_inventory: TypeInventory[];

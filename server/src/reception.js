@@ -6,8 +6,9 @@
 //   en_revision  → hay una revisión abierta.
 //   revisada     → se revisó (con o sin consumo) y falta surtirla. Al surtir vuelve a surtida.
 import * as XLSX from 'xlsx';
+import { randomUUID } from 'node:crypto';
 import { db, nextRev, transaction } from './db.js';
-import { catalog } from './seed.js';
+import { catalog, regenerateRooms } from './seed.js';
 
 /** "bw 243", "Hab. BW-243" → "BW243" (igual que app/src/rooms.ts). */
 const normalizeRoomNumber = (raw) =>
@@ -20,7 +21,7 @@ function itemsFor(inspectionIds) {
   if (inspectionIds.length === 0) return map;
   const rows = db
     .prepare(
-      `SELECT ii.inspection_id, ii.product_id, p.name, ii.quantity, ii.unit_price
+      `SELECT ii.inspection_id, ii.product_id, p.name, ii.quantity, ii.unit_price, ii.reason, ii.expires_on
          FROM inspection_items ii JOIN products p ON p.id = ii.product_id
         WHERE ii.inspection_id IN (${inspectionIds.map(() => '?').join(',')}) AND ii.quantity > 0
         ORDER BY p.sort`
@@ -52,12 +53,12 @@ function roomStates(roomIds = null) {
   const args = roomIds ?? [];
   const pending = withItems(
     db
-      .prepare(`SELECT * FROM inspections WHERE finished_at IS NOT NULL AND restocked_at IS NULL ${filter} ORDER BY finished_at`)
+      .prepare(`SELECT * FROM inspections WHERE finished_at IS NOT NULL AND restocked_at IS NULL AND kind != 'cambio' ${filter} ORDER BY finished_at`)
       .all(...args)
   );
   const open = db.prepare(`SELECT * FROM inspections WHERE finished_at IS NULL ${filter}`).all(...args);
   const lastFinished = db
-    .prepare(`SELECT room_id, MAX(finished_at) AS at FROM inspections WHERE finished_at IS NOT NULL ${filter} GROUP BY room_id`)
+    .prepare(`SELECT room_id, MAX(finished_at) AS at FROM inspections WHERE finished_at IS NOT NULL AND kind != 'cambio' ${filter} GROUP BY room_id`)
     .all(...args);
   const lastRestock = db
     .prepare(`SELECT room_id, MAX(restocked_at) AS at FROM inspections WHERE restocked_at IS NOT NULL ${filter} GROUP BY room_id`)
@@ -75,10 +76,14 @@ function roomStates(roomIds = null) {
   return states;
 }
 
+// Las novedades NAP o no reconocido no se vuelven a surtir: el consumo ya se contó en la revisión.
+const restocks = (i) => !(i.kind === 'novedad' && (i.charge === 'nap' || i.charge === 'no_reconocido'));
+
 function summarize(room, st) {
   const pending = st?.pending ?? [];
   const missing = new Map();
   for (const i of pending)
+    if (restocks(i))
     for (const it of i.items) {
       const m = missing.get(it.product_id) ?? { product_id: it.product_id, name: it.name, quantity: 0, unit_price: it.unit_price };
       m.quantity += it.quantity;
@@ -86,8 +91,7 @@ function summarize(room, st) {
     }
   const missingList = [...missing.values()];
   let status = 'surtida';
-  if (st?.open) status = 'en_revision';
-  else if (room.review_at && (!st?.lastFinishedAt || st.lastFinishedAt < room.review_at)) status = 'por_revisar';
+  if (room.review_at && (!st?.lastFinishedAt || st.lastFinishedAt < room.review_at)) status = 'por_revisar';
   else if (pending.length) status = 'revisada';
   const last = pending[pending.length - 1] ?? null;
   const units = missingList.reduce((s, m) => s + m.quantity, 0);
@@ -101,15 +105,19 @@ function summarize(room, st) {
     reviewed_by: last?.inspector ?? null,
     restocked_at: st?.lastRestockAt ?? null,
     // Revisada sin consumo: hay que volver a confirmarla cuando el huésped se vaya.
-    needs_confirm: status === 'revisada' && units === 0 && !pending.some((i) => i.kind === 'confirmacion'),
+    needs_confirm: status === 'revisada' && units === 0 && !pending.some((i) => i.kind === 'confirmacion' || !restocks(i)),
     has_novedad: pending.some((i) => i.kind === 'novedad'),
+    charges: [...new Set(pending.map((i) => i.charge).filter(Boolean))],
+    double_cycle: !!room.double_cycle,
+    pending_checkout: !!room.pending_checkout,
   };
 }
 
 const roomSql = `
   SELECT r.id, r.number, r.type, r.block_id, b.code AS block_code, b.name AS block_name,
-         g.guest_name, g.flight_time, g.review_at
-    FROM rooms r JOIN blocks b ON b.id = r.block_id LEFT JOIN guests g ON g.room_id = r.id`;
+         g.guest_name, g.flight_time, g.review_at, g.worker_id, w.name AS worker_name, g.double_cycle, g.pending_checkout
+    FROM rooms r JOIN blocks b ON b.id = r.block_id LEFT JOIN guests g ON g.room_id = r.id
+    LEFT JOIN workers w ON w.id = g.worker_id AND w.active = 1`;
 
 export function listRooms() {
   const rooms = db.prepare(`${roomSql} WHERE r.active = 1 ORDER BY r.sort`).all();
@@ -169,14 +177,106 @@ export function setInspectionItems(inspectionId, items) {
 }
 
 /** Huésped, vuelo y (opcional) marcar "por revisar". Vacío = habitación libre. */
-export function setGuest(roomId, { guest_name, flight_time, review }) {
-  const cur = db.prepare(`SELECT review_at FROM guests WHERE room_id = ?`).get(roomId);
+export function setGuest(roomId, { guest_name, flight_time, review, worker_id, double_cycle, pending_checkout }) {
+  const cur = db.prepare(`SELECT * FROM guests WHERE room_id = ?`).get(roomId);
   const reviewAt = review === true ? Date.now() : review === false ? null : cur?.review_at ?? null;
+  const keep = (v, old, map = (x) => x) => (v === undefined ? old ?? null : map(v));
   db.prepare(
-    `INSERT INTO guests (room_id, guest_name, flight_time, review_at, updated_at, rev) VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO guests (room_id, guest_name, flight_time, review_at, worker_id, double_cycle, pending_checkout, updated_at, rev)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(room_id) DO UPDATE SET guest_name = excluded.guest_name, flight_time = excluded.flight_time,
-       review_at = excluded.review_at, updated_at = excluded.updated_at, rev = excluded.rev`
-  ).run(roomId, guest_name?.trim() || null, flight_time?.trim() || null, reviewAt, Date.now(), nextRev());
+       review_at = excluded.review_at, worker_id = excluded.worker_id, double_cycle = excluded.double_cycle,
+       pending_checkout = excluded.pending_checkout, updated_at = excluded.updated_at, rev = excluded.rev`
+  ).run(
+    roomId,
+    keep(guest_name, cur?.guest_name, (v) => (v ? String(v).trim() : null)) || null,
+    keep(flight_time, cur?.flight_time, (v) => (v ? String(v).trim() : null)) || null,
+    reviewAt,
+    keep(worker_id, cur?.worker_id, (v) => v || null),
+    keep(double_cycle, cur?.double_cycle, (v) => (v ? 1 : 0)) ?? 0,
+    keep(pending_checkout, cur?.pending_checkout, (v) => (v ? 1 : 0)) ?? 0,
+    Date.now(),
+    nextRev()
+  );
+}
+
+/**
+ * Recepción registra una revisión (o una novedad, o un consumo adicional) sin pasar por la
+ * tablet: queda terminada en este momento con lo consumido.
+ */
+export function createInspection(roomId, { kind = 'revision', inspector, items = [], charge, notes }) {
+  if (!['revision', 'consumo', 'novedad'].includes(kind)) return null;
+  if (!db.prepare(`SELECT 1 FROM rooms WHERE id = ?`).get(roomId)) return null;
+  const id = randomUUID();
+  const now = Date.now();
+  const price = db.prepare(`SELECT price FROM products WHERE id = ?`);
+  transaction(() => {
+    db.prepare(
+      `INSERT INTO inspections (id, room_id, inspector, device_id, kind, started_at, finished_at, notes, charge, updated_at, rev)
+       VALUES (?, ?, ?, 'recepcion', ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, roomId, inspector?.trim() || 'Recepción', kind, now, now, notes?.trim() || null, CHARGES.includes(charge) ? charge : null, now, nextRev());
+    const item = db.prepare(
+      `INSERT INTO inspection_items (id, inspection_id, product_id, quantity, unit_price, updated_at, rev) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const it of items) {
+      const p = price.get(it.product_id);
+      const q = Math.max(0, it.quantity | 0);
+      if (p && q) item.run(`${id}:${it.product_id}`, id, it.product_id, q, p.price, now, nextRev());
+    }
+  });
+  return id;
+}
+
+/** Nota de una revisión o novedad (descripción detallada). */
+export function setNotes(inspectionId, notes) {
+  return db.prepare(`UPDATE inspections SET notes = ?, updated_at = ?, rev = ? WHERE id = ?`).run(notes?.trim() || null, Date.now(), nextRev(), inspectionId).changes > 0;
+}
+
+// ---------- Trabajadores ----------
+
+export function workers() {
+  return db
+    .prepare(
+      `SELECT w.id, w.name, COUNT(g.room_id) AS assigned
+         FROM workers w LEFT JOIN guests g ON g.worker_id = w.id
+        WHERE w.active = 1 GROUP BY w.id ORDER BY w.name COLLATE NOCASE`
+    )
+    .all();
+}
+
+export function createWorker(name) {
+  const id = randomUUID();
+  db.prepare(`INSERT INTO workers (id, name, updated_at, rev) VALUES (?, ?, ?, ?)`).run(id, name.trim(), Date.now(), nextRev());
+  return id;
+}
+
+export function updateWorker(id, { name }) {
+  return db.prepare(`UPDATE workers SET name = ?, updated_at = ?, rev = ? WHERE id = ? AND active = 1`).run(name.trim(), Date.now(), nextRev(), id).changes > 0;
+}
+
+/** Se desactiva (su historial se conserva) y sus habitaciones quedan sin asignar. */
+export function deleteWorker(id) {
+  transaction(() => {
+    db.prepare(`UPDATE workers SET active = 0, updated_at = ?, rev = ? WHERE id = ?`).run(Date.now(), nextRev(), id);
+    for (const { room_id } of db.prepare(`SELECT room_id FROM guests WHERE worker_id = ?`).all(id)) setGuest(room_id, { worker_id: null });
+  });
+  return true;
+}
+
+/** Asigna (o quita, con workerId null) varias habitaciones a la vez. */
+export function assignRooms(workerId, roomIds) {
+  transaction(() => {
+    for (const id of roomIds) setGuest(id, { worker_id: workerId || null });
+  });
+  return true;
+}
+
+const CHARGES = ['post', 'nap', 'no_reconocido'];
+
+/** Tipo de novedad o cobro: 'post', 'nap' (no se acercó a pagar), 'no_reconocido' o null. */
+export function setCharge(inspectionId, charge) {
+  const value = CHARGES.includes(charge) ? charge : null;
+  return db.prepare(`UPDATE inspections SET charge = ?, updated_at = ?, rev = ? WHERE id = ?`).run(value, Date.now(), nextRev(), inspectionId).changes > 0;
 }
 
 export function setRoomType(roomId, type) {
@@ -216,6 +316,12 @@ export function importSheet(buffer) {
   const cGuest = col(/huesped|nombre|cliente|pasajero/);
   const cFlight = col(/vuelo|hora|salida/);
   const cType = col(/^tipo/);
+  const cWorker = col(/trabaj|camarer|encargad|revisa|asignad|responsable/);
+  const cDouble = col(/doble|ciclo/);
+  const cPending = col(/pendiente|por salir/);
+  const yes = (v) => /^(x|si|s|1|true|y|yes)$/.test(norm(v));
+  const workerByName = new Map(workers().map((w) => [norm(w.name), w.id]));
+  const unknownWorkers = new Set();
 
   const byNumber = db.prepare(`SELECT id FROM rooms WHERE number = ? AND active = 1`);
   const marked = [];
@@ -230,24 +336,30 @@ export function importSheet(buffer) {
         notFound.push(String(raw));
         continue;
       }
+      const workerName = cWorker >= 0 && r[cWorker] != null ? String(r[cWorker]).trim() : '';
+      const workerId = workerName ? workerByName.get(norm(workerName)) : undefined;
+      if (workerName && !workerId) unknownWorkers.add(workerName);
       setGuest(id, {
         guest_name: cGuest >= 0 && r[cGuest] != null ? String(r[cGuest]) : null,
         flight_time: cFlight >= 0 ? flightText(r[cFlight]) : null,
         review: true,
+        ...(workerId ? { worker_id: workerId } : {}),
+        ...(cDouble >= 0 ? { double_cycle: yes(r[cDouble]) } : {}),
+        ...(cPending >= 0 ? { pending_checkout: yes(r[cPending]) } : {}),
       });
       const type = cType >= 0 ? String(r[cType] ?? '').trim().toUpperCase() : '';
       if (TYPES.has(type)) setRoomType(id, type);
       marked.push(number);
     }
   });
-  return { ok: true, marked: marked.length, rooms: marked, notFound };
+  return { ok: true, marked: marked.length, rooms: marked, notFound, unknownWorkers: [...unknownWorkers] };
 }
 
 // ---------- Reporte del día ----------
 
 export function dayReport({ from, to }) {
   const rooms = listRooms();
-  const reviewed = withItems(
+  let reviewed = withItems(
     db
       .prepare(
         `SELECT i.*, r.number AS room_number, r.type AS room_type, b.code AS block_code
@@ -266,46 +378,43 @@ export function dayReport({ from, to }) {
         GROUP BY r.id ORDER BY restocked_at DESC`
     )
     .all(from, to);
+  const changes = reviewed.filter((i) => i.kind === 'cambio');
+  reviewed = reviewed.filter((i) => i.kind !== 'cambio');
   const pendingReview = rooms.filter((r) => r.status === 'por_revisar');
   const pendingRestock = rooms.filter((r) => r.status === 'revisada');
   return {
+    changes,
     counts: {
       revisadas: new Set(reviewed.map((i) => i.room_id)).size,
       por_revisar: pendingReview.length,
       por_surtir: pendingRestock.length,
       surtidas: restocked.length,
       novedades: reviewed.filter((i) => i.kind === 'novedad').length,
+      nap: reviewed.filter((i) => i.charge === 'nap').length,
+      no_reconocido: reviewed.filter((i) => i.charge === 'no_reconocido').length,
+      cambios: changes.length,
       total: reviewed.reduce((s, i) => s + i.total, 0),
     },
     reviewed,
     restocked,
-    pendingReview: pendingReview.map((r) => ({ room_id: r.id, room_number: r.number, block_code: r.block_code, guest_name: r.guest_name, flight_time: r.flight_time })),
+    pendingReview: pendingReview.map((r) => ({ room_id: r.id, room_number: r.number, block_code: r.block_code, guest_name: r.guest_name, flight_time: r.flight_time, worker_name: r.worker_name, pending_checkout: r.pending_checkout })),
     pendingRestock: pendingRestock.map((r) => ({ room_id: r.id, room_number: r.number, block_code: r.block_code, units: r.units, total: r.total, missing: r.missing })),
   };
 }
 
-const KIND_LABEL = { revision: 'Revisión', consumo: 'Consumo', novedad: 'Novedad', confirmacion: 'Confirmación' };
-
-export function dayReportCsv(range) {
-  const rep = dayReport(range);
-  const t = (ms) => (ms ? new Date(ms).toLocaleTimeString('es-CO', { hour12: false }) : '');
-  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const lines = [['Sección', 'Habitación', 'Bloque', 'Tipo', 'Quién', 'Entrada', 'Salida', 'Detalle', 'Total']];
-  for (const i of rep.reviewed)
-    lines.push([
-      KIND_LABEL[i.kind] ?? 'Revisión', i.room_number, i.block_code, i.room_type, i.inspector, t(i.started_at), t(i.finished_at),
-      i.units ? i.items.map((it) => `${it.quantity} ${it.name}`).join(', ') : 'Sin consumo', i.total,
-    ]);
-  for (const r of rep.pendingReview) lines.push(['Sin revisar', r.room_number, r.block_code, '', '', '', '', r.guest_name ?? '', '']);
-  for (const r of rep.restocked) lines.push(['Surtida', r.room_number, r.block_code, '', r.restocked_by, '', t(r.restocked_at), '', '']);
-  for (const r of rep.pendingRestock) lines.push(['Falta surtir', r.room_number, r.block_code, '', '', '', '', `${r.units} productos`, r.total]);
-  return '﻿' + lines.map((l) => l.map(esc).join(';')).join('\r\n');
+/** Salidas que hay que revisar ese día: las marcadas "por revisar" en el día (y, si es hoy,
+ *  todas las que siguen por revisar). Ordenadas por trabajador y hora de vuelo. */
+export function checkouts({ from, to }) {
+  const now = Date.now();
+  const today = now >= from && now < to;
+  const flight = (t) => (t && /\d/.test(t) ? t.padStart(5, '0') : '99:99');
+  return listRooms()
+    .filter((r) => r.type !== 'SM' && ((r.review_at >= from && r.review_at < to) || (today && r.status === 'por_revisar')))
+    .sort((a, b) => (!a.worker_name - !b.worker_name) || (a.worker_name ?? '').localeCompare(b.worker_name ?? '') || flight(a.flight_time).localeCompare(flight(b.flight_time)));
 }
 
-// ---------- Inventario global, por tipo, y bloques ----------
-
 export function products() {
-  return db.prepare(`SELECT id, name, price, image, active, sort FROM products ORDER BY sort`).all();
+  return db.prepare(`SELECT id, name, price, presentation, image, active, sort FROM products ORDER BY sort`).all();
 }
 
 export function createProduct(name, price) {
@@ -319,14 +428,15 @@ export function createProduct(name, price) {
   return id;
 }
 
-export function updateProduct(id, { name, price, active, image }) {
+export function updateProduct(id, { name, price, active, image, presentation }) {
   const p = db.prepare(`SELECT * FROM products WHERE id = ?`).get(id);
   if (!p) return false;
-  db.prepare(`UPDATE products SET name = ?, price = ?, active = ?, image = ?, updated_at = ?, rev = ? WHERE id = ?`).run(
+  db.prepare(`UPDATE products SET name = ?, price = ?, active = ?, image = ?, presentation = ?, updated_at = ?, rev = ? WHERE id = ?`).run(
     name?.trim() || p.name,
     price != null ? Math.max(0, Math.round(price)) : p.price,
     active != null ? (active ? 1 : 0) : p.active,
     image !== undefined ? image : p.image,
+    presentation !== undefined ? presentation?.trim() || null : p.presentation,
     Date.now(),
     nextRev(),
     id
@@ -353,21 +463,44 @@ export function setTypeInventory(type, items) {
 export function blocks() {
   return db
     .prepare(
-      `SELECT b.id, b.code, b.name, COUNT(r.id) AS rooms, MIN(r.sort) AS sort,
-              (SELECT number FROM rooms WHERE block_id = b.id AND active = 1 ORDER BY sort LIMIT 1) AS first,
-              (SELECT number FROM rooms WHERE block_id = b.id AND active = 1 ORDER BY sort DESC LIMIT 1) AS last
-         FROM blocks b JOIN rooms r ON r.block_id = b.id AND r.active = 1 GROUP BY b.id ORDER BY sort`
+      `SELECT b.id, b.code, b.name, b.ranges, b.sort,
+              (SELECT COUNT(*) FROM rooms r WHERE r.block_id = b.id AND r.active = 1) AS rooms
+         FROM blocks b WHERE b.ranges IS NOT NULL ORDER BY b.sort`
     )
-    .all();
+    .all()
+    .map((b) => ({ ...b, ranges: JSON.parse(b.ranges) }));
 }
 
-export function updateBlock(id, { code, name }) {
+/** Series válidas: [prefijo, desde, hasta] con desde ≤ hasta. */
+function cleanRanges(ranges) {
+  return (ranges ?? [])
+    .map(([p, a, z]) => [String(p ?? '').toUpperCase().replace(/\s/g, ''), Math.round(Number(a)), Math.round(Number(z))])
+    .filter(([, a, z]) => a > 0 && z >= a && z - a < 1000);
+}
+
+export function updateBlock(id, { code, name, ranges }) {
   const b = db.prepare(`SELECT * FROM blocks WHERE id = ?`).get(id);
   if (!b) return false;
-  db.prepare(`UPDATE blocks SET code = ?, name = ?, updated_at = ?, rev = ? WHERE id = ?`).run(
-    code?.trim() || b.code, name?.trim() || b.name, Date.now(), nextRev(), id
-  );
+  transaction(() => {
+    db.prepare(`UPDATE blocks SET code = ?, name = ?, ranges = ?, updated_at = ?, rev = ? WHERE id = ?`).run(
+      code?.trim() || b.code, name?.trim() || b.name, ranges ? JSON.stringify(cleanRanges(ranges)) : b.ranges, Date.now(), nextRev(), id
+    );
+    regenerateRooms(id);
+  });
   return true;
+}
+
+export function createBlock({ code, name, ranges }) {
+  const id = norm(code).replace(/[^a-z0-9]+/g, '') || randomUUID();
+  if (db.prepare(`SELECT 1 FROM blocks WHERE id = ?`).get(id)) return null;
+  const sort = (db.prepare(`SELECT MAX(sort) AS m FROM blocks`).get().m ?? 0) + 1;
+  transaction(() => {
+    db.prepare(`INSERT INTO blocks (id, code, name, ranges, sort, updated_at, rev) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+      id, code.trim(), (name || code).trim(), JSON.stringify(cleanRanges(ranges)), sort, Date.now(), nextRev()
+    );
+    regenerateRooms(id);
+  });
+  return id;
 }
 
 // ---------- Analítica ----------
@@ -379,7 +512,7 @@ export function analytics({ from, to }) {
       .prepare(
         `SELECT i.*, r.number AS room_number, r.type AS room_type, b.code AS block_code
            FROM inspections i JOIN rooms r ON r.id = i.room_id JOIN blocks b ON b.id = r.block_id
-          WHERE i.finished_at >= ? AND i.finished_at < ?`
+          WHERE i.finished_at >= ? AND i.finished_at < ? AND i.kind != 'cambio'`
       )
       .all(from, to)
   );
@@ -453,6 +586,8 @@ export function analytics({ from, to }) {
       unidades: inspections.reduce((s, i) => s + i.units, 0),
       novedades: inspections.filter((i) => i.kind === 'novedad').length,
       con_consumo: work.filter((i) => i.units > 0).length,
+      nap: inspections.filter((i) => i.charge === 'nap').length,
+      no_reconocido: inspections.filter((i) => i.charge === 'no_reconocido').length,
     },
     people: [...people.values()]
       .map(({ durations: ds, ...p }) => ({ ...p, tiempo_medio: avg(ds) }))

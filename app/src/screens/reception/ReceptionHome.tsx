@@ -6,7 +6,7 @@ import { api } from '../../api';
 import type { RoomRow, RoomStatus } from '../../types';
 import { dayRange, money, STATUS_LABEL, time } from '../../format';
 import RoomGrid from '../../RoomGrid';
-import { BoxGlyph, ChartGlyph, DocGlyph, DoorGlyph, GearGlyph, GridGlyph, LayersGlyph, UploadGlyph } from '../../icons';
+import { BoxGlyph, ChartGlyph, PeopleGlyph, DocGlyph, DoorGlyph, GearGlyph, GridGlyph, LayersGlyph, UploadGlyph } from '../../icons';
 import { C, Confirm, Drawer, Screen, tabular } from '../../ui';
 import { canPickFiles, fileToBase64, pickFile } from '../../webfile';
 import RoomDetail from './RoomDetail';
@@ -14,11 +14,13 @@ import ReportPanel from './ReportPanel';
 import InventoryPanel from './InventoryPanel';
 import BlocksPanel from './BlocksPanel';
 import AnalyticsPanel from './AnalyticsPanel';
+import WorkersPanel from './WorkersPanel';
 
-type Section = 'habitaciones' | 'analitica' | 'reporte' | 'inventario' | 'bloques';
+type Section = 'habitaciones' | 'trabajadores' | 'analitica' | 'reporte' | 'inventario' | 'bloques';
 
 const NAV: { key: Section; label: string; Icon: (p: { size?: number; color?: string }) => React.ReactElement }[] = [
   { key: 'habitaciones', label: 'Habitaciones', Icon: GridGlyph },
+  { key: 'trabajadores', label: 'Trabajadores', Icon: PeopleGlyph },
   { key: 'analitica', label: 'Analítica', Icon: ChartGlyph },
   { key: 'reporte', label: 'Reporte del día', Icon: DocGlyph },
   { key: 'inventario', label: 'Inventario', Icon: BoxGlyph },
@@ -26,12 +28,13 @@ const NAV: { key: Section; label: string; Icon: (p: { size?: number; color?: str
 ];
 
 const NAVY = '#0B1640';
-const ORDER: RoomStatus[] = ['por_revisar', 'en_revision', 'revisada', 'surtida'];
+const ORDER: RoomStatus[] = ['por_revisar', 'revisada', 'surtida'];
 
 interface ImportResult {
   ok: boolean;
   marked?: number;
   notFound?: string[];
+  unknownWorkers?: string[];
   error?: string;
 }
 
@@ -159,9 +162,10 @@ export default function ReceptionHome({ onSettings }: { onSettings: () => void }
         {section === 'habitaciones' && (
           <>
             <HotelBar rooms={rooms} todayTotal={todayTotal} />
-            <RoomGrid rooms={rooms} onPress={select} selectedId={selected} emptyText={error ? 'Sin datos del servidor.' : undefined} />
+            <RoomGrid rooms={rooms} onPress={select} selectedId={selected} showWorker emptyText={error ? 'Sin datos del servidor.' : undefined} />
           </>
         )}
+        {section === 'trabajadores' && <WorkersPanel onChanged={load} />}
         {section === 'analitica' && <AnalyticsPanel />}
         {section === 'reporte' && <ReportPanel onOpenRoom={setSelected} />}
         {section === 'inventario' && <InventoryPanel />}
@@ -179,7 +183,7 @@ export default function ReceptionHome({ onSettings }: { onSettings: () => void }
           imported?.ok
             ? `${imported.marked} habitaciones quedaron por revisar.${
                 imported.notFound?.length ? `\nNo se encontraron: ${imported.notFound.slice(0, 15).join(', ')}${imported.notFound.length > 15 ? '…' : ''}` : ''
-              }`
+              }${imported.unknownWorkers?.length ? `\nTrabajadores que no existen (créalos en Trabajadores): ${imported.unknownWorkers.join(', ')}` : ''}`
             : imported?.error
         }
         confirmText="Listo"

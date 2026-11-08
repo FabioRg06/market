@@ -32,7 +32,7 @@ const CATEGORIES = [
 ];
 const categoryOf = (id: string) => CATEGORIES.find((c) => c.ids.includes(id)) ?? CATEGORIES[3];
 
-const STATUS_ORDER: RoomStatus[] = ['por_revisar', 'en_revision', 'revisada', 'surtida'];
+const STATUS_ORDER: RoomStatus[] = ['por_revisar', 'revisada', 'surtida'];
 const KIND_COLORS: Record<string, string> = { revision: PALETTE[0], consumo: PALETTE[1], novedad: PALETTE[4], confirmacion: PALETTE[2] };
 const TYPE_COLORS: Record<string, string> = { CM: PALETTE[2], SS: PALETTE[6], SM: PALETTE[1], PR: PALETTE[4], VIP: PALETTE[3] };
 
