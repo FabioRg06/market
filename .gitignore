@@ -3,3 +3,4 @@ server/data/
 app/dist/
 app/.expo/
 *.log
+release/

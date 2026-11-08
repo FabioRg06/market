@@ -19,8 +19,15 @@ export default function App() {
   const [route, setRoute] = useState<Route>({ name: 'home' });
 
   useEffect(() => {
+    // En el PC de recepción el acceso directo abre con ?rol=recepcion y salta la elección.
+    const fromUrl =
+      typeof window !== 'undefined' && window.location?.search
+        ? new URLSearchParams(window.location.search).get('rol')
+        : null;
+    if (fromUrl === 'recepcion' || fromUrl === 'revision') AsyncStorage.setItem(ROLE_KEY, fromUrl).catch(() => {});
     AsyncStorage.getItem(ROLE_KEY)
-      .then((r) => {
+      .then((stored) => {
+        const r = fromUrl === 'recepcion' || fromUrl === 'revision' ? fromUrl : stored;
         setRole((r as Role) ?? null);
         // Si la app se cerró con una revisión abierta, se vuelve directo a ella.
         const open = r === 'revision' ? getAnyOpenInspection() : null;
