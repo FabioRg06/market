@@ -7,6 +7,7 @@ import { applyPush, pullSince } from './sync.js';
 import * as reception from './reception.js';
 import { ensureCatalog } from './seed.js';
 import { writeCheckoutsPdf, writeDayReportPdf } from './reportPdf.js';
+import * as auth from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 4000);
@@ -18,7 +19,7 @@ const app = express();
 app.use(express.json({ limit: '20mb' }));
 app.use((req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*');
-  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
@@ -32,6 +33,10 @@ function range(req) {
   const to = Number(req.query.to ?? from + 24 * 60 * 60 * 1000);
   return { from, to };
 }
+
+// Recepción entra con usuario y contraseña; las tablets siguen sincronizando sin cuenta.
+app.use(auth.guard);
+auth.routes(app);
 
 // `app` permite que las tablets encuentren solas este servidor en la red.
 app.get('/api/health', (_req, res) => res.json({ ok: true, app: 'market', time: Date.now() }));

@@ -8,6 +8,7 @@ import RolePicker, { type Role } from './src/screens/RolePicker';
 import RoomList from './src/screens/inspector/RoomList';
 import InspectRoom from './src/screens/inspector/InspectRoom';
 import ReceptionHome from './src/screens/reception/ReceptionHome';
+import ReceptionGate from './src/screens/reception/ReceptionGate';
 import SettingsScreen from './src/screens/SettingsScreen';
 
 type Route = { name: 'home' } | { name: 'inspect'; inspectionId: string } | { name: 'settings' };
@@ -57,7 +58,12 @@ export default function App() {
         onChangeRole={() => chooseRole(null)}
       />
     );
-  else if (role === 'recepcion') content = <ReceptionHome onSettings={() => setRoute({ name: 'settings' })} />;
+  else if (role === 'recepcion')
+    content = (
+      <ReceptionGate onChangeRole={() => chooseRole(null)}>
+        <ReceptionHome onSettings={() => setRoute({ name: 'settings' })} />
+      </ReceptionGate>
+    );
   else if (role === 'revision')
     content =
       route.name === 'inspect' ? (

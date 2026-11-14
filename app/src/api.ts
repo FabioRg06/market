@@ -1,5 +1,38 @@
 // Llamadas al servidor de recepción.
+import { Platform } from 'react-native';
 import { getSettings } from './settings';
+
+// Sesión de recepción: el servidor la pide en todo menos sincronizar. En el navegador se
+// guarda mientras la ventana esté abierta, para que recargar no saque al usuario.
+const KEY = 'market.sesion';
+let token: string | null = null;
+try {
+  if (Platform.OS === 'web') token = window.sessionStorage.getItem(KEY);
+} catch {}
+const listeners = new Set<() => void>();
+
+export const session = {
+  get token() {
+    return token;
+  },
+  set(next: string | null) {
+    token = next;
+    try {
+      if (Platform.OS === 'web') next ? window.sessionStorage.setItem(KEY, next) : window.sessionStorage.removeItem(KEY);
+    } catch {}
+    listeners.forEach((fn) => fn());
+  },
+  /** Avisa cuando la sesión cambia (entró, salió o el servidor la dio por vencida). */
+  onChange(fn: () => void) {
+    listeners.add(fn);
+    return () => {
+      listeners.delete(fn);
+    };
+  },
+};
+
+/** Para abrir un PDF en otra ventana: ahí no viaja la cabecera, la sesión va en la dirección. */
+export const withSession = (url: string) => (token ? `${url}${url.includes('?') ? '&' : '?'}t=${token}` : url);
 
 export async function request<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const { serverUrl } = await getSettings();
@@ -9,8 +42,12 @@ export async function request<T>(path: string, init?: RequestInit & { timeoutMs?
     const res = await fetch(serverUrl + path, {
       ...init,
       signal: controller.signal,
-      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init?.headers ?? {}) },
     });
+    if (res.status === 401) {
+      session.set(null);
+      throw new Error('La sesión venció. Vuelve a entrar.');
+    }
     if (!res.ok) throw new Error(`El servidor respondió ${res.status}`);
     return (await res.json()) as T;
   } catch (err: any) {

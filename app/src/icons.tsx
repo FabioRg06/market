@@ -66,6 +66,15 @@ export function GearGlyph({ size = 22, color = '#334155' }: IconProps) {
   );
 }
 
+export function LogoutGlyph({ size = 20, color = '#334155' }: IconProps) {
+  return (
+    <Base size={size} color={color} strokeWidth={3.5}>
+      <Path d="M20 8H11a3 3 0 0 0-3 3v26a3 3 0 0 0 3 3h9" />
+      <Path d="M30 15l9 9-9 9M39 24H19" />
+    </Base>
+  );
+}
+
 // Íconos del menú de recepción.
 export function GridGlyph({ size = 20, color = '#334155' }: IconProps) {
   return (

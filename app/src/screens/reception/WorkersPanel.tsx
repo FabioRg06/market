@@ -225,9 +225,30 @@ export default function WorkersPanel({ onChanged }: { onChanged: () => void }) {
               {byBlock.length === 0 && <Text style={st.empty}>No hay habitaciones por revisar. Carga el Excel de salidas o cambia a “Todas”.</Text>}
               {byBlock.map(([block, list]) => (
                 <View key={block} style={{ gap: 8 }}>
-                  <Text style={st.block}>
-                    {block} <Text style={{ color: C.muted, fontWeight: '500' }}>· {list.length}</Text>
-                  </Text>
+                  <View style={[s.row, { gap: 10 }]}>
+                    <Text style={st.block}>
+                      {block} <Text style={{ color: C.muted, fontWeight: '500' }}>· {list.length}</Text>
+                    </Text>
+                    {(() => {
+                      const ids = list.map((r) => r.id);
+                      const all = ids.every((id) => selected.has(id));
+                      return (
+                        <Pressable
+                          onPress={() =>
+                            setSelected((sel) => {
+                              const n = new Set(sel);
+                              for (const id of ids) all ? n.delete(id) : n.add(id);
+                              return n;
+                            })
+                          }
+                          accessibilityRole="button"
+                          style={st.blockAll}
+                        >
+                          <Text style={st.blockAllText}>{all ? 'Quitar bloque' : 'Elegir todo el bloque'}</Text>
+                        </Pressable>
+                      );
+                    })()}
+                  </View>
                   <View style={st.chips}>
                     {list.map((r) => {
                       const idx = order.indexOf(r.id);
@@ -337,6 +358,8 @@ const st = StyleSheet.create({
   ghost: { borderRadius: 10, paddingHorizontal: 14, height: 40, justifyContent: 'center', borderWidth: 1, borderColor: C.line },
   ghostText: { color: C.body, fontWeight: '600', fontSize: 14 },
   block: { fontSize: 14, fontWeight: '800', color: C.ink },
+  blockAll: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: C.line, backgroundColor: C.surface },
+  blockAllText: { fontSize: 12, fontWeight: '600', color: C.brand },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, ...(Platform.OS === 'web' ? ({ userSelect: 'none' } as any) : null) },
   chip: {
     minWidth: 74,

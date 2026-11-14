@@ -2,7 +2,9 @@
 // La búsqueda y los bloques van dentro de la lista: al bajar se esconden y las habitaciones
 // ocupan toda la pantalla; al volver arriba aparecen. Los estados van en el botón de filtros.
 // Pensado para cientos de tarjetas: altura fija, filtros en memoria y solo se dibuja lo visible.
-import React, { memo, useCallback, useMemo, useState } from 'react';
+// Se pueden activar varios filtros a la vez, y la búsqueda, los filtros, el bloque y el punto
+// de la lista se conservan al entrar a una habitación y volver.
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, LayoutChangeEvent, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { RoomRow, RoomStatus } from './types';
 import { STATUS_LABEL } from './format';
@@ -13,26 +15,38 @@ const CARD_H = 118;
 const GAP = 10;
 const STATUSES: RoomStatus[] = ['por_revisar', 'revisada', 'surtida'];
 
-/** Filtros: los estados, dos marcas de las revisadas y las de cada habitación. */
-type Filter = RoomStatus | 'por_confirmar' | 'novedad' | 'por_salir' | 'doble_ciclo';
+/** Filtros: los estados y las marcas de cada habitación. */
+type Filter = RoomStatus | 'novedad' | 'por_salir' | 'doble_ciclo';
 const FILTERS: { key: Filter; label: string; color: string; ring: string }[] = [
   ...STATUSES.map((st) => ({ key: st as Filter, label: STATUS_LABEL[st], color: C.status[st].tint, ring: C.status[st].solid })),
-  { key: 'por_confirmar', label: 'Por confirmar', color: C.status.revisada.tint, ring: C.status.revisada.ink },
   { key: 'novedad', label: 'Con novedad', color: '#FDECEC', ring: C.danger },
   { key: 'por_salir', label: 'Pendiente por salir', color: '#FFF4E5', ring: '#C77D12' },
   { key: 'doble_ciclo', label: 'Doble ciclo', color: '#EEF2FE', ring: C.brand },
 ];
 const matches = (r: RoomRow, f: Filter) =>
-  f === 'por_confirmar'
-    ? r.needs_confirm
-    : f === 'novedad'
-      ? r.has_novedad
-      : f === 'por_salir'
-        ? r.pending_checkout
-        : f === 'doble_ciclo'
-          ? r.double_cycle
-          : r.status === f;
+  f === 'novedad' ? r.has_novedad : f === 'por_salir' ? r.pending_checkout : f === 'doble_ciclo' ? r.double_cycle : r.status === f;
+const isStatus = (f: Filter) => (STATUSES as Filter[]).includes(f);
+/** Varios filtros: basta uno de los estados elegidos, y se deben cumplir todas las marcas. */
+function matchesAll(r: RoomRow, active: Filter[]) {
+  const statuses = active.filter(isStatus);
+  if (statuses.length && !statuses.includes(r.status)) return false;
+  return active.every((f) => isStatus(f) || matches(r, f));
+}
 const NO_PENDING = new Set<string>();
+
+/** Lo que el usuario tenía puesto, por pantalla: sobrevive a salir y volver a la lista. */
+interface Kept {
+  query: string;
+  active: Filter[];
+  block: string | null;
+  mine: boolean;
+  offset: number;
+}
+const kept = new Map<string, Kept>();
+const keptFor = (key: string): Kept => {
+  if (!kept.has(key)) kept.set(key, { query: '', active: [], block: null, mine: true, offset: 0 });
+  return kept.get(key)!;
+};
 
 export default function RoomGrid({
   rooms,
@@ -42,6 +56,7 @@ export default function RoomGrid({
   reserveRight = 0,
   mineWorkerId = null,
   showWorker = false,
+  stateKey = 'lista',
   emptyText = 'Ninguna habitación coincide con el filtro.',
 }: {
   rooms: RoomRow[];
@@ -54,13 +69,23 @@ export default function RoomGrid({
   mineWorkerId?: string | null;
   /** Recepción: la tarjeta muestra a quién está asignada. */
   showWorker?: boolean;
+  /** Nombre de la pantalla, para recordar sus filtros por separado. */
+  stateKey?: string;
   emptyText?: string;
 }) {
+  const memory = keptFor(stateKey);
   const [width, setWidth] = useState(0);
-  const [query, setQuery] = useState('');
-  const [status, setStatus] = useState<Filter | null>(null);
-  const [block, setBlock] = useState<string | null>(null);
-  const [mine, setMine] = useState(true);
+  const [query, setQuery] = useState(memory.query);
+  const [active, setActive] = useState<Filter[]>(memory.active);
+  const [block, setBlock] = useState<string | null>(memory.block);
+  const [mine, setMine] = useState(memory.mine);
+  useEffect(() => {
+    Object.assign(memory, { query, active, block, mine });
+  }, [memory, query, active, block, mine]);
+  const toggleFilter = (f: Filter) => setActive((cur) => (cur.includes(f) ? cur.filter((x) => x !== f) : [...cur, f]));
+  // Al volver, la lista queda en el mismo punto donde estaba.
+  const list = useRef<FlatList<RoomRow>>(null);
+  const restored = useRef(false);
   const onlyMine = !!mineWorkerId && mine;
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -83,11 +108,11 @@ export default function RoomGrid({
     return rooms.filter(
       (r) =>
         (!onlyMine || r.worker_id === mineWorkerId) &&
-        (!status || matches(r, status)) &&
+        matchesAll(r, active) &&
         (!block || r.block_id === block) &&
         (!q || r.number.toLowerCase().includes(q.replace(/\s/g, '')) || (r.guest_name ?? '').toLowerCase().includes(q))
     );
-  }, [rooms, query, status, block, onlyMine, mineWorkerId]);
+  }, [rooms, query, active, block, onlyMine, mineWorkerId]);
 
   const phone = width > 0 && width < 600;
   const pad = phone ? 12 : 20;
@@ -116,9 +141,14 @@ export default function RoomGrid({
           onPress={() => setFiltersOpen(true)}
           accessibilityRole="button"
           accessibilityLabel="Filtros"
-          style={[g.iconBtn, status && { backgroundColor: C.brand, borderColor: C.brand }]}
+          style={[g.iconBtn, active.length > 0 && { backgroundColor: C.brand, borderColor: C.brand }]}
         >
-          <FilterGlyph size={20} color={status ? C.onBrand : C.body} />
+          <FilterGlyph size={20} color={active.length ? C.onBrand : C.body} />
+          {active.length > 1 && (
+            <View style={g.filterCount}>
+              <Text style={g.filterCountText}>{active.length}</Text>
+            </View>
+          )}
         </Pressable>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
@@ -128,12 +158,16 @@ export default function RoomGrid({
           <Tab key={b.id} label={b.code} active={block === b.id} onPress={() => setBlock(block === b.id ? null : b.id)} />
         ))}
       </ScrollView>
-      {status && (
-        <Pressable onPress={() => setStatus(null)} style={g.activeFilter} accessibilityRole="button" accessibilityLabel="Quitar filtro">
-          <View style={[g.dot, { backgroundColor: FILTERS.find((x) => x.key === status)!.ring }]} />
-          <Text style={g.activeFilterText}>{FILTERS.find((x) => x.key === status)!.label}</Text>
-          <Text style={[g.activeFilterText, { color: C.muted }]}>✕</Text>
-        </Pressable>
+      {active.length > 0 && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+          {FILTERS.filter((x) => active.includes(x.key)).map((x) => (
+            <Pressable key={x.key} onPress={() => toggleFilter(x.key)} style={g.activeFilter} accessibilityRole="button" accessibilityLabel={`Quitar filtro ${x.label}`}>
+              <View style={[g.dot, { backgroundColor: x.ring }]} />
+              <Text style={g.activeFilterText}>{x.label}</Text>
+              <Text style={[g.activeFilterText, { color: C.muted }]}>✕</Text>
+            </Pressable>
+          ))}
+        </View>
       )}
     </View>
   );
@@ -142,8 +176,18 @@ export default function RoomGrid({
     <View style={{ flex: 1 }} onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
       {width > 0 && (
         <FlatList
+          ref={list}
           key={columns}
           data={filtered}
+          onScroll={(e) => {
+            memory.offset = e.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={64}
+          onContentSizeChange={() => {
+            if (restored.current) return;
+            restored.current = true;
+            if (memory.offset > 0) list.current?.scrollToOffset({ offset: memory.offset, animated: false });
+          }}
           numColumns={columns}
           keyExtractor={(r) => r.id}
           ListHeaderComponent={header}
@@ -173,34 +217,30 @@ export default function RoomGrid({
         <Pressable style={g.overlay} onPress={() => setFiltersOpen(false)}>
           <Pressable style={g.sheet} onPress={() => {}}>
             <Text style={g.sheetTitle}>Filtrar</Text>
+            <Text style={g.sheetHint}>Puedes elegir varios.</Text>
             {FILTERS.map((x, i) => {
-              const active = status === x.key;
+              const on = active.includes(x.key);
               return (
                 <Pressable
                   key={x.key}
-                  onPress={() => {
-                    setStatus(active ? null : x.key);
-                    setFiltersOpen(false);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  style={[g.option, active && { backgroundColor: C.bg }, i === STATUSES.length && g.optionSep]}
+                  onPress={() => toggleFilter(x.key)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: on }}
+                  style={[g.option, on && { backgroundColor: C.bg }, i === STATUSES.length && g.optionSep]}
                 >
                   <View style={[g.swatch, { backgroundColor: x.color, borderColor: x.ring }]} />
-                  <Text style={[g.optionText, active && { color: C.brand, fontWeight: '700' }]}>{x.label}</Text>
+                  <Text style={[g.optionText, on && { color: C.brand, fontWeight: '700' }]}>{x.label}</Text>
                   <Text style={[g.optionCount, tabular]}>{counts[x.key]}</Text>
+                  <View style={[g.check, on && { backgroundColor: C.brand, borderColor: C.brand }]}>
+                    {on && <Text style={g.checkMark}>✓</Text>}
+                  </View>
                 </Pressable>
               );
             })}
-            <Btn
-              title="Ver todas"
-              variant="secondary"
-              onPress={() => {
-                setStatus(null);
-                setFiltersOpen(false);
-              }}
-              style={{ marginTop: 6 }}
-            />
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+              <Btn title="Quitar filtros" variant="secondary" disabled={!active.length} onPress={() => setActive([])} style={{ flex: 1 }} />
+              <Btn title={`Ver ${filtered.length}`} onPress={() => setFiltersOpen(false)} style={{ flex: 1 }} />
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -256,7 +296,6 @@ export const RoomCard = memo(function RoomCard({
       <View style={g.topRow}>
         <TypeBadge type={room.type} />
         <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
-          {room.needs_confirm && <Flag text="Confirmar" color={c.ink} />}
           {room.pending_checkout && <Flag text="Por salir" color="#C77D12" />}
           {room.double_cycle && <Flag text="2 ciclos" color={C.brand} />}
           {pending && <CloudPending size={15} color={C.muted} />}
@@ -325,7 +364,23 @@ const g = StyleSheet.create({
   activeFilterText: { fontSize: 13, fontWeight: '600', color: C.body },
   overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.4)', justifyContent: 'center', padding: 20 },
   sheet: { backgroundColor: C.surface, borderRadius: 16, padding: 18, gap: 4, width: '100%', maxWidth: 400, alignSelf: 'center' },
-  sheetTitle: { fontSize: 17, fontWeight: '700', color: C.ink, marginBottom: 8 },
+  sheetTitle: { fontSize: 17, fontWeight: '700', color: C.ink },
+  sheetHint: { fontSize: 13, color: C.muted, marginBottom: 8 },
+  check: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: C.line, alignItems: 'center', justifyContent: 'center' },
+  checkMark: { color: '#FFFFFF', fontSize: 14, fontWeight: '800', lineHeight: 16 },
+  filterCount: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: C.ink,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  filterCountText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
   option: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 10, borderRadius: 10 },
   swatch: { width: 18, height: 18, borderRadius: 5, borderWidth: 1.5 },
   optionText: { flex: 1, fontSize: 15, color: C.ink },

@@ -1,5 +1,6 @@
 // Reporte del día en PDF, con el mismo orden del reporte en papel:
-// Sí / No (revisadas y sin revisar), Pendiente (lo que falta surtir), Novedades y el detalle.
+// Sí (revisadas con consumo), No (revisadas sin consumo), Pendientes (faltó revisarlas),
+// lo que falta surtir, Novedades y el detalle.
 import PDFDocument from 'pdfkit';
 import { checkouts, dayReport } from './reception.js';
 
@@ -18,6 +19,15 @@ const dateText = (ms) =>
   new Date(ms).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 const itemsText = (items) => items.map((it) => `${it.quantity} ${it.name}`).join(', ');
 
+/** Nombre de la empresa en el encabezado, solo letras: "SOLUCIONES" y debajo el resto. */
+function company(doc, left, width) {
+  const w = 168;
+  const x = left + width - w;
+  doc.font('Helvetica').fontSize(17).fillColor('#FFFFFF').text('SOLUCIONES', x, 22, { width: w, align: 'right', characterSpacing: 1.2, lineBreak: false });
+  doc.moveTo(x + 14, 42).lineTo(x + w, 42).lineWidth(0.6).strokeColor('#9FB0DC').stroke();
+  doc.font('Helvetica-Bold').fontSize(6.6).fillColor('#C7D3F5').text('CREATIVAS Y TURÍSTICAS S.A.S', x, 46, { width: w, align: 'right', characterSpacing: 0.8, lineBreak: false });
+}
+
 /** Escribe el PDF en `stream` (la respuesta HTTP). */
 export function writeDayReportPdf(range, stream) {
   const rep = dayReport(range);
@@ -35,14 +45,15 @@ export function writeDayReportPdf(range, stream) {
   doc.rect(0, 84, doc.page.width, 4).fill(BRAND);
   doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(22).text('Reporte del día', left, 24, { lineBreak: false });
   doc.font('Helvetica').fontSize(11).fillColor('#C7D3F5').text(dateText(range.from), left, 54, { lineBreak: false });
-  doc.font('Helvetica-Bold').fontSize(11).fillColor('#FFFFFF').text('MARKET', left, 30, { width, align: 'right', lineBreak: false });
+  company(doc, left, width);
 
   // Resumen: una fila, todas las casillas a la misma altura.
   const top = 108;
   const stats = [
-    ['Sí · revisadas', String(rep.counts.revisadas), INK],
-    ['No · sin revisar', String(rep.counts.por_revisar), INK],
-    ['Pendiente', String(rep.counts.por_surtir), INK],
+    ['Sí', String(rep.counts.si), INK],
+    ['No', String(rep.counts.no), INK],
+    ['Pendientes', String(rep.counts.pendientes), rep.counts.pendientes ? RED : INK],
+    ['Falta surtir', String(rep.counts.por_surtir), INK],
     ['Novedades', String(rep.counts.novedades), rep.counts.novedades ? RED : INK],
     ['Consumo', money(rep.counts.total), INK],
   ];
@@ -58,8 +69,9 @@ export function writeDayReportPdf(range, stream) {
     while (size > 9 && doc.fontSize(size).widthOfString(value) > boxW - 20) size--;
     doc.fontSize(size).fillColor(color).text(value, x + 10, top + 26 + (17 - size) / 2, { width: boxW - 20, lineBreak: false });
   });
+  doc.font('Helvetica').fontSize(8).fillColor(MUTED).text('Sí: revisadas con consumo   ·   No: revisadas sin consumo   ·   Pendientes: faltó revisarlas', left, top + 62, { width, lineBreak: false });
   doc.x = left;
-  doc.y = top + 78;
+  doc.y = top + 88;
 
   function heading(text, count) {
     ensure(40);
@@ -89,7 +101,7 @@ export function writeDayReportPdf(range, stream) {
     doc.y += 10;
   }
 
-  heading('Pendiente por surtir', rep.pendingRestock.length);
+  heading('Falta surtir', rep.pendingRestock.length);
   list(
     rep.pendingRestock.map((r) => [r.room_number, r.units ? itemsText(r.missing) : 'Sin consumo', r.units ? money(r.total) : '']),
     'Todo lo revisado está surtido.'
@@ -127,14 +139,14 @@ export function writeDayReportPdf(range, stream) {
     'Sin cambios.'
   );
 
-  heading('Sin revisar', rep.pendingReview.length);
+  heading('Pendientes por revisar', rep.pendingReview.length);
   list(
     rep.pendingReview.map((r) => [
       r.room_number,
       [r.guest_name ?? '—', r.worker_name && `asignada a ${r.worker_name}`, r.pending_checkout && 'pendiente por salir'].filter(Boolean).join(' · '),
       r.flight_time ? `vuelo ${r.flight_time}` : '',
     ]),
-    'No quedan habitaciones por revisar.'
+    'No quedó ninguna habitación pendiente por revisar.'
   );
 
   // Detalle de revisiones
@@ -210,7 +222,8 @@ export function writeCheckoutsPdf(range, stream) {
   doc.rect(0, 84, doc.page.width, 4).fill(BRAND);
   doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(22).text('Reporte de salidas', left, 24, { lineBreak: false });
   doc.font('Helvetica').fontSize(11).fillColor('#C7D3F5').text(dateText(range.from), left, 54, { lineBreak: false });
-  doc.font('Helvetica-Bold').fontSize(11).fillColor('#FFFFFF').text(`${rooms.length} habitaciones`, left, 30, { width, align: 'right', lineBreak: false });
+  company(doc, left, width);
+  doc.font('Helvetica').fontSize(10).fillColor('#C7D3F5').text(`${rooms.length} habitaciones`, left, 62, { width, align: 'right', lineBreak: false });
   doc.x = left;
   doc.y = 108;
 

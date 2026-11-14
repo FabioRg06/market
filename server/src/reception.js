@@ -4,7 +4,9 @@
 //   surtida      → normal; así amanecen todas.
 //   por_revisar  → el Excel de salidas la marcó y nadie la ha revisado después.
 //   en_revision  → hay una revisión abierta.
-//   revisada     → se revisó (con o sin consumo) y falta surtirla. Al surtir vuelve a surtida.
+//   revisada     → se revisó, hubo consumo y falta surtirla. Al surtir vuelve a surtida.
+// Sin consumo no hay nada que surtir: la habitación vuelve a surtida y solo queda en el reporte.
+// Las habitaciones sin minibar (SM) nunca quedan por revisar.
 import * as XLSX from 'xlsx';
 import { randomUUID } from 'node:crypto';
 import { db, nextRev, transaction } from './db.js';
@@ -90,11 +92,13 @@ function summarize(room, st) {
       missing.set(it.product_id, m);
     }
   const missingList = [...missing.values()];
-  let status = 'surtida';
-  if (room.review_at && (!st?.lastFinishedAt || st.lastFinishedAt < room.review_at)) status = 'por_revisar';
-  else if (pending.length) status = 'revisada';
-  const last = pending[pending.length - 1] ?? null;
   const units = missingList.reduce((s, m) => s + m.quantity, 0);
+  let status = 'surtida';
+  if (room.type !== 'SM') {
+    if (room.review_at && (!st?.lastFinishedAt || st.lastFinishedAt < room.review_at)) status = 'por_revisar';
+    else if (units > 0) status = 'revisada';
+  }
+  const last = pending[pending.length - 1] ?? null;
   return {
     ...room,
     status,
@@ -104,10 +108,9 @@ function summarize(room, st) {
     reviewed_at: last?.finished_at ?? null,
     reviewed_by: last?.inspector ?? null,
     restocked_at: st?.lastRestockAt ?? null,
-    // Revisada sin consumo: hay que volver a confirmarla cuando el huésped se vaya.
-    needs_confirm: status === 'revisada' && units === 0 && !pending.some((i) => i.kind === 'confirmacion' || !restocks(i)),
-    has_novedad: pending.some((i) => i.kind === 'novedad'),
-    charges: [...new Set(pending.map((i) => i.charge).filter(Boolean))],
+    needs_confirm: false,
+    has_novedad: status === 'revisada' && pending.some((i) => i.kind === 'novedad'),
+    charges: status === 'revisada' ? [...new Set(pending.map((i) => i.charge).filter(Boolean))] : [],
     double_cycle: !!room.double_cycle,
     pending_checkout: !!room.pending_checkout,
   };
@@ -179,7 +182,8 @@ export function setInspectionItems(inspectionId, items) {
 /** Huésped, vuelo y (opcional) marcar "por revisar". Vacío = habitación libre. */
 export function setGuest(roomId, { guest_name, flight_time, review, worker_id, double_cycle, pending_checkout }) {
   const cur = db.prepare(`SELECT * FROM guests WHERE room_id = ?`).get(roomId);
-  const reviewAt = review === true ? Date.now() : review === false ? null : cur?.review_at ?? null;
+  const noMinibar = db.prepare(`SELECT type FROM rooms WHERE id = ?`).get(roomId)?.type === 'SM';
+  const reviewAt = noMinibar ? null : review === true ? Date.now() : review === false ? null : cur?.review_at ?? null;
   const keep = (v, old, map = (x) => x) => (v === undefined ? old ?? null : map(v));
   db.prepare(
     `INSERT INTO guests (room_id, guest_name, flight_time, review_at, worker_id, double_cycle, pending_checkout, updated_at, rev)
@@ -303,6 +307,10 @@ function flightText(v) {
 /**
  * Lee el Excel (o CSV) de salidas: cada fila con número de habitación queda "por revisar",
  * con su huésped y hora de vuelo. Columnas reconocidas: Habitación, Huésped/Nombre, Vuelo/Hora, Tipo.
+ * El número puede venir sin el bloque ("243" en vez de "BW243"): se busca la habitación que
+ * tenga ese número. Si varios bloques lo tienen (101 está en C, K y L) hace falta una columna
+ * "Bloque"; sin ella la fila se devuelve en `ambiguous` y no se marca nada. Las habitaciones
+ * sin minibar no se marcan (`noMinibar`).
  */
 export function importSheet(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer' });
@@ -319,23 +327,50 @@ export function importSheet(buffer) {
   const cWorker = col(/trabaj|camarer|encargad|revisa|asignad|responsable/);
   const cDouble = col(/doble|ciclo/);
   const cPending = col(/pendiente|por salir/);
+  const cBlock = col(/bloque|torre|edificio|sector/);
   const yes = (v) => /^(x|si|s|1|true|y|yes)$/.test(norm(v));
   const workerByName = new Map(workers().map((w) => [norm(w.name), w.id]));
   const unknownWorkers = new Set();
 
-  const byNumber = db.prepare(`SELECT id FROM rooms WHERE number = ? AND active = 1`);
+  // Habitaciones por su número completo y por el número sin letras.
+  const byFull = new Map();
+  const byDigits = new Map();
+  for (const room of db.prepare(`SELECT r.id, r.number, r.type, b.code FROM rooms r JOIN blocks b ON b.id = r.block_id WHERE r.active = 1`).all()) {
+    byFull.set(room.number, room);
+    const digits = room.number.replace(/\D/g, '');
+    if (!byDigits.has(digits)) byDigits.set(digits, []);
+    byDigits.get(digits).push(room);
+  }
   const marked = [];
   const notFound = [];
+  const ambiguous = [];
+  const noMinibar = [];
   transaction(() => {
     for (const r of rows.slice(headerIdx + 1)) {
       const raw = r[cRoom];
       if (raw == null || raw === '') continue;
-      const number = normalizeRoomNumber(String(raw));
-      const id = byNumber.get(number)?.id;
-      if (!id) {
+      const typed = normalizeRoomNumber(String(raw));
+      const block = cBlock >= 0 && r[cBlock] != null ? normalizeRoomNumber(String(r[cBlock])).replace(/^BLOQUE/, '') : '';
+      let room = byFull.get(typed) ?? (block ? byFull.get(block + typed) : undefined);
+      if (!room && /^\d+$/.test(typed)) {
+        let same = byDigits.get(typed) ?? [];
+        if (block) same = same.filter((x) => x.code.toUpperCase() === block);
+        if (same.length > 1) {
+          ambiguous.push(`${typed} (${same.map((x) => x.code).join(', ')})`);
+          continue;
+        }
+        room = same[0];
+      }
+      if (!room) {
         notFound.push(String(raw));
         continue;
       }
+      if (room.type === 'SM') {
+        noMinibar.push(room.number);
+        continue;
+      }
+      const id = room.id;
+      const number = room.number;
       const workerName = cWorker >= 0 && r[cWorker] != null ? String(r[cWorker]).trim() : '';
       const workerId = workerName ? workerByName.get(norm(workerName)) : undefined;
       if (workerName && !workerId) unknownWorkers.add(workerName);
@@ -352,7 +387,7 @@ export function importSheet(buffer) {
       marked.push(number);
     }
   });
-  return { ok: true, marked: marked.length, rooms: marked, notFound, unknownWorkers: [...unknownWorkers] };
+  return { ok: true, marked: marked.length, rooms: marked, notFound, ambiguous, noMinibar, unknownWorkers: [...unknownWorkers] };
 }
 
 // ---------- Reporte del día ----------
@@ -382,9 +417,16 @@ export function dayReport({ from, to }) {
   reviewed = reviewed.filter((i) => i.kind !== 'cambio');
   const pendingReview = rooms.filter((r) => r.status === 'por_revisar');
   const pendingRestock = rooms.filter((r) => r.status === 'revisada');
+  // Sí = revisadas con consumo · No = revisadas sin consumo · Pendientes = faltó revisarlas.
+  const unitsByRoom = new Map();
+  for (const i of reviewed) unitsByRoom.set(i.room_id, (unitsByRoom.get(i.room_id) ?? 0) + i.units);
+  const withConsumption = [...unitsByRoom.values()].filter((u) => u > 0).length;
   return {
     changes,
     counts: {
+      si: withConsumption,
+      no: unitsByRoom.size - withConsumption,
+      pendientes: pendingReview.length,
       revisadas: new Set(reviewed.map((i) => i.room_id)).size,
       por_revisar: pendingReview.length,
       por_surtir: pendingRestock.length,

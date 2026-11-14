@@ -108,10 +108,11 @@ export function roomState(
     }
   const missingList = [...missing.values()];
   let status: RoomStatus = 'surtida';
-  if (reviewAt && (!lastFinishedAt || lastFinishedAt < reviewAt)) status = 'por_revisar';
-  else if (pending.length) status = 'revisada';
-  const last = pending[pending.length - 1];
   const units = missingList.reduce((s, m) => s + m.quantity, 0);
+  // Sin consumo no hay nada que surtir: vuelve a surtida y solo queda en el reporte.
+  if (reviewAt && (!lastFinishedAt || lastFinishedAt < reviewAt)) status = 'por_revisar';
+  else if (units > 0) status = 'revisada';
+  const last = pending[pending.length - 1];
   return {
     status,
     missing: missingList,
@@ -120,9 +121,9 @@ export function roomState(
     reviewed_at: last?.finished_at ?? null,
     reviewed_by: last?.inspector ?? null,
     restocked_at: lastRestockAt,
-    needs_confirm: status === 'revisada' && units === 0 && !pending.some((i) => i.kind === 'confirmacion' || !restocks(i)),
-    has_novedad: pending.some((i) => i.kind === 'novedad'),
-    charges: [...new Set(pending.map((i) => i.charge).filter(Boolean))] as RoomState['charges'],
+    needs_confirm: false,
+    has_novedad: status === 'revisada' && pending.some((i) => i.kind === 'novedad'),
+    charges: (status === 'revisada' ? [...new Set(pending.map((i) => i.charge).filter(Boolean))] : []) as RoomState['charges'],
   };
 }
 

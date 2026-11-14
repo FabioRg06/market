@@ -2,11 +2,11 @@
 // la acción de la sección y, en Habitaciones, la barra del estado de todo el hotel.
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { api } from '../../api';
+import { api, session } from '../../api';
 import type { RoomRow, RoomStatus } from '../../types';
 import { dayRange, money, STATUS_LABEL, time } from '../../format';
 import RoomGrid from '../../RoomGrid';
-import { BoxGlyph, ChartGlyph, PeopleGlyph, DocGlyph, DoorGlyph, GearGlyph, GridGlyph, LayersGlyph, UploadGlyph } from '../../icons';
+import { BoxGlyph, ChartGlyph, PeopleGlyph, DocGlyph, DoorGlyph, GearGlyph, GridGlyph, LayersGlyph, LogoutGlyph, UploadGlyph } from '../../icons';
 import { C, Confirm, Drawer, Screen, tabular } from '../../ui';
 import { canPickFiles, fileToBase64, pickFile } from '../../webfile';
 import RoomDetail from './RoomDetail';
@@ -34,6 +34,8 @@ interface ImportResult {
   ok: boolean;
   marked?: number;
   notFound?: string[];
+  ambiguous?: string[];
+  noMinibar?: string[];
   unknownWorkers?: string[];
   error?: string;
 }
@@ -139,16 +141,30 @@ export default function ReceptionHome({ onSettings }: { onSettings: () => void }
           <GearGlyph size={19} color="#8E9CC4" />
           {!rail && <Text style={st.navText}>Ajustes</Text>}
         </Pressable>
+        <Pressable
+          onPress={() => {
+            api.post('/api/auth/logout', {}).catch(() => {});
+            session.set(null);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Cerrar sesión"
+          style={({ hovered }: any) => [st.navItem, rail && st.navRail, hovered && st.navHover]}
+        >
+          <LogoutGlyph size={19} color="#8E9CC4" />
+          {!rail && <Text style={st.navText}>Cerrar sesión</Text>}
+        </Pressable>
       </View>
 
       {/* Contenido */}
       <View style={{ flex: 1 }}>
         <View style={st.top}>
-          <Text style={st.topTitle}>{current.label}</Text>
+          <Text style={[st.topTitle, { flex: 1, flexShrink: 1 }]} numberOfLines={1}>
+            {current.label}
+          </Text>
           {section === 'habitaciones' && canPickFiles && (
             <Pressable onPress={importExcel} disabled={importing} accessibilityRole="button" style={({ hovered }: any) => [st.cta, hovered && { opacity: 0.9 }]}>
               <UploadGlyph size={16} color="#FFFFFF" />
-              <Text style={st.ctaText}>{importing ? 'Cargando…' : 'Cargar salidas (Excel)'}</Text>
+              <Text style={st.ctaText}>{importing ? 'Cargando…' : width < 600 ? 'Salidas' : 'Cargar salidas (Excel)'}</Text>
             </Pressable>
           )}
         </View>
@@ -162,7 +178,7 @@ export default function ReceptionHome({ onSettings }: { onSettings: () => void }
         {section === 'habitaciones' && (
           <>
             <HotelBar rooms={rooms} todayTotal={todayTotal} />
-            <RoomGrid rooms={rooms} onPress={select} selectedId={selected} showWorker emptyText={error ? 'Sin datos del servidor.' : undefined} />
+            <RoomGrid stateKey="recepcion" rooms={rooms} onPress={select} selectedId={selected} showWorker emptyText={error ? 'Sin datos del servidor.' : undefined} />
           </>
         )}
         {section === 'trabajadores' && <WorkersPanel onChanged={load} />}
@@ -183,7 +199,11 @@ export default function ReceptionHome({ onSettings }: { onSettings: () => void }
           imported?.ok
             ? `${imported.marked} habitaciones quedaron por revisar.${
                 imported.notFound?.length ? `\nNo se encontraron: ${imported.notFound.slice(0, 15).join(', ')}${imported.notFound.length > 15 ? '…' : ''}` : ''
-              }${imported.unknownWorkers?.length ? `\nTrabajadores que no existen (créalos en Trabajadores): ${imported.unknownWorkers.join(', ')}` : ''}`
+              }${
+                imported.ambiguous?.length
+                  ? `\nEstán en varios bloques (agrega una columna "Bloque" al Excel): ${imported.ambiguous.slice(0, 12).join(', ')}${imported.ambiguous.length > 12 ? '…' : ''}`
+                  : ''
+              }${imported.noMinibar?.length ? `\nSin minibar, no se marcaron: ${imported.noMinibar.slice(0, 15).join(', ')}${imported.noMinibar.length > 15 ? '…' : ''}` : ''}${imported.unknownWorkers?.length ? `\nTrabajadores que no existen (créalos en Trabajadores): ${imported.unknownWorkers.join(', ')}` : ''}`
             : imported?.error
         }
         confirmText="Listo"
@@ -202,7 +222,7 @@ function HotelBar({ rooms, todayTotal }: { rooms: RoomRow[]; todayTotal: number 
   const novedades = rooms.filter((r) => r.has_novedad).length;
   return (
     <View style={st.hotel}>
-      <View style={{ flex: 1, gap: 10, minWidth: 320 }}>
+      <View style={{ flex: 1, flexBasis: 240, gap: 10, minWidth: 0 }}>
         <View style={st.bar} accessibilityLabel="Estado del hotel">
           {ORDER.map((k) => {
             const n = count(k);
@@ -254,7 +274,8 @@ const st = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 28,
+    gap: 12,
+    paddingHorizontal: 20,
     backgroundColor: C.surface,
     borderBottomWidth: 1,
     borderBottomColor: C.line,

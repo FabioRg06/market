@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-na
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C } from '../ui';
 import { ChartGlyph, DoorGlyph } from '../icons';
+import { CompanyWordmark } from '../brand';
 
 export type Role = 'revision' | 'recepcion';
 
@@ -48,6 +49,11 @@ export default function RolePicker({ onPick }: { onPick: (r: Role) => void }) {
           <View style={st.stats}>
             <Stat value="Sin señal" label="la tablet guarda todo y lo envía sola" />
             <Stat value="En vivo" label="recepción ve cada revisión al momento" />
+          </View>
+        )}
+        {wide && (
+          <View style={{ marginTop: 'auto', paddingTop: 24 }}>
+            <CompanyWordmark color="#FFFFFF" muted="#9FB0DC" />
           </View>
         )}
       </View>

@@ -86,7 +86,7 @@ export default function RoomList({
 
   return (
     <Screen>
-      <RoomGrid rooms={rooms} onPress={onRoomPress} pendingIds={pending} reserveRight={52} mineWorkerId={workerId} />
+      <RoomGrid stateKey="revision" rooms={rooms} onPress={onRoomPress} pendingIds={pending} reserveRight={52} mineWorkerId={workerId} />
       {/* Ajustes: botón flotante en la esquina, por encima de las habitaciones. */}
       <Pressable
         onPress={onSettings}
