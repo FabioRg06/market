@@ -48,7 +48,7 @@ export function regenerateRooms(blockId) {
 }
 
 /** Crea lo que falte del catálogo sin pisar lo que recepción haya cambiado. */
-const productImages = JSON.parse(fs.readFileSync(path.join(__dirname, 'product-images.json'), 'utf8'));
+export const productImages = JSON.parse(fs.readFileSync(path.join(__dirname, 'product-images.json'), 'utf8'));
 
 export function ensureCatalog() {
   const now = Date.now();
@@ -77,10 +77,10 @@ export function ensureCatalog() {
     );
     for (const p of catalog.products) product.run(p.id, p.name, p.price, p.presentation ?? null, p.sort, now, nextRev());
 
-    // Fotos fijas de los productos: vienen con el programa, así toda instalación las tiene
-    // sin depender de internet. Solo se ponen donde no hay foto (recepción puede cambiarlas).
-    const photo = db.prepare(`UPDATE products SET image = ?, updated_at = ?, rev = ? WHERE id = ? AND image IS NULL`);
-    for (const [id, image] of Object.entries(productImages)) photo.run(image, now, nextRev(), id);
+    // Fotos fijas de los productos: vienen con el programa y siempre son estas, en toda
+    // instalación y sin depender de internet. Si en la base hay otra (o ninguna), se repone.
+    const photo = db.prepare(`UPDATE products SET image = ?, updated_at = ?, rev = ? WHERE id = ? AND (image IS NULL OR image <> ?)`);
+    for (const [id, image] of Object.entries(productImages)) photo.run(image, now, nextRev(), id, image);
 
     const typeInv = db.prepare(
       `INSERT OR IGNORE INTO type_inventory (type, product_id, quantity, updated_at, rev) VALUES (?, ?, ?, ?, ?)`

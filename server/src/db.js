@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = process.env.MARKET_DATA_DIR ?? path.join(__dirname, '..', 'data');
+export const dataDir = process.env.MARKET_DATA_DIR ?? path.join(__dirname, '..', 'data');
 fs.mkdirSync(dataDir, { recursive: true });
 
 export const db = new DatabaseSync(path.join(dataDir, 'market.db'));
@@ -138,6 +138,26 @@ addColumn('inspections', 'charge', 'TEXT');
 addColumn('inspection_items', 'reason', 'TEXT');
 addColumn('inspection_items', 'expires_on', 'TEXT');
 addColumn('products', 'presentation', 'TEXT');
+
+// Facturas enviadas a Siigo: una por revisión con consumo.
+//   status: pending (esperando su turno) · setup (falta configurar algo; no se envía)
+//           sent (ya está en Siigo) · error (Siigo la rechazó; espera corrección)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS siigo_invoices (
+    inspection_id TEXT PRIMARY KEY REFERENCES inspections(id),
+    status        TEXT NOT NULL,
+    total         INTEGER NOT NULL DEFAULT 0,
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    next_try      INTEGER NOT NULL DEFAULT 0,
+    error         TEXT,
+    siigo_id      TEXT,
+    siigo_name    TEXT,
+    sent_at       INTEGER,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_siigo_status ON siigo_invoices(status, next_try);
+`);
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS workers (

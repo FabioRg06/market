@@ -10,7 +10,7 @@
 import * as XLSX from 'xlsx';
 import { randomUUID } from 'node:crypto';
 import { db, nextRev, transaction } from './db.js';
-import { catalog, regenerateRooms } from './seed.js';
+import { catalog, productImages, regenerateRooms } from './seed.js';
 
 /** "bw 243", "Hab. BW-243" → "BW243" (igual que app/src/rooms.ts). */
 const normalizeRoomNumber = (raw) =>
@@ -453,7 +453,11 @@ export function checkouts({ from, to }) {
 }
 
 export function products() {
-  return db.prepare(`SELECT id, name, price, presentation, image, active, sort FROM products ORDER BY sort`).all();
+  // `fixed_image`: la foto viene con el programa y no se cambia desde recepción.
+  return db
+    .prepare(`SELECT id, name, price, presentation, image, active, sort FROM products ORDER BY sort`)
+    .all()
+    .map((p) => ({ ...p, fixed_image: !!productImages[p.id] }));
 }
 
 export function createProduct(name, price) {
@@ -474,7 +478,7 @@ export function updateProduct(id, { name, price, active, image, presentation }) 
     name?.trim() || p.name,
     price != null ? Math.max(0, Math.round(price)) : p.price,
     active != null ? (active ? 1 : 0) : p.active,
-    image !== undefined ? image : p.image,
+    image !== undefined && !productImages[id] ? image : p.image,
     presentation !== undefined ? presentation?.trim() || null : p.presentation,
     Date.now(),
     nextRev(),

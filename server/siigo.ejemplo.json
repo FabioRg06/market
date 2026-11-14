@@ -1,0 +1,28 @@
+{
+  "activo": false,
+  "usuario": "usuario-api@empresa.com",
+  "accessKey": "PEGAR-AQUI-LA-ACCESS-KEY",
+  "tipoFactura": 0,
+  "vendedor": 0,
+  "formaPago": 0,
+  "bodega": null,
+  "cliente": "222222222222",
+  "enviarDian": false,
+  "preciosConImpuestos": true,
+  "productos": {
+    "agua": "",
+    "cocacola": "",
+    "gatorade": "",
+    "hit": "",
+    "club_colombia": "",
+    "detodito_g": "",
+    "detodito_p": "",
+    "mani_g": "",
+    "mani_p": "",
+    "salchichas": "",
+    "crema": "",
+    "cepillo": "",
+    "shampoo": "",
+    "preservativo": ""
+  }
+}

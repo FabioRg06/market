@@ -125,6 +125,24 @@ export function BoxGlyph({ size = 20, color = '#334155' }: IconProps) {
   );
 }
 
+export function WarehouseGlyph({ size = 20, color = '#334155' }: IconProps) {
+  return (
+    <Base size={size} color={color} strokeWidth={3.5}>
+      <Path d="M5 18L24 7l19 11v24H5z" />
+      <Path d="M13 42V26h22v16M13 32h22M13 38h22" />
+    </Base>
+  );
+}
+
+export function InvoiceGlyph({ size = 20, color = '#334155' }: IconProps) {
+  return (
+    <Base size={size} color={color} strokeWidth={3.5}>
+      <Path d="M11 5h26v38l-5-3-4 3-4-3-4 3-4-3-5 3z" />
+      <Path d="M17 15h14M17 22h14M17 29h8" />
+    </Base>
+  );
+}
+
 export function LayersGlyph({ size = 20, color = '#334155' }: IconProps) {
   return (
     <Base size={size} color={color} strokeWidth={3.5}>

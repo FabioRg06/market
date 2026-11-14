@@ -8,6 +8,7 @@ import * as reception from './reception.js';
 import { ensureCatalog } from './seed.js';
 import { writeCheckoutsPdf, writeDayReportPdf } from './reportPdf.js';
 import * as auth from './auth.js';
+import * as siigo from './siigo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 4000);
@@ -184,6 +185,9 @@ if (fs.existsSync(webDir)) {
   app.use(express.static(webDir));
   app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(path.join(webDir, 'index.html')));
 }
+
+// Facturación en Siigo: corre por detrás según server/data/siigo.json (apagada si no existe).
+siigo.start();
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`\nMarket - servidor de recepción en el puerto ${PORT}`);

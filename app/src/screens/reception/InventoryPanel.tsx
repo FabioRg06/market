@@ -15,6 +15,8 @@ interface ProductRow {
   presentation: string | null;
   image: string | null;
   active: number;
+  /** La foto viene con el programa y no se cambia. */
+  fixed_image?: boolean;
 }
 
 export default function InventoryPanel() {
@@ -94,15 +96,15 @@ export default function InventoryPanel() {
         <View style={[panel, { flexGrow: 3, flexBasis: 480 }]}>
           <Text style={title}>Inventario global</Text>
           <Text style={[s.muted, { marginBottom: 6 }]}>
-            Todo lo que ofrece Market. {canPickFiles ? 'Toca la imagen para subir la foto real del producto.' : ''}
+            Todo lo que ofrece Market. Las fotos de los productos vienen fijas con el programa.{canPickFiles ? ' Si un producto no tiene foto, toca el recuadro para subirla.' : ''}
           </Text>
           {products.map((p) => (
             <View key={p.id} style={[s.row, { paddingVertical: 8, borderTopWidth: 1, borderTopColor: C.bg, opacity: p.active ? 1 : 0.5 }]}>
               <Pressable
                 onPress={() => uploadPhoto(p)}
-                disabled={!canPickFiles}
-                accessibilityRole="button"
-                accessibilityLabel={`Subir foto de ${p.name}`}
+                disabled={!canPickFiles || !!p.fixed_image}
+                accessibilityRole={p.fixed_image ? 'image' : 'button'}
+                accessibilityLabel={p.fixed_image ? p.name : `Subir foto de ${p.name}`}
                 style={{ width: 52, height: 52, borderRadius: 10, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: C.line, alignItems: 'center', justifyContent: 'center' }}
               >
                 <ProductPicture id={p.id} image={p.image} size={34} />
