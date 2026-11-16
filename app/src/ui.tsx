@@ -7,6 +7,7 @@ import {
   Image,
   Modal,
   Pressable,
+  ScrollView,
   StyleProp,
   StyleSheet,
   Text,
@@ -187,8 +188,11 @@ export function Confirm({
       <View style={s.overlay}>
         <View style={s.dialog}>
           <Text style={s.dialogTitle}>{title}</Text>
-          {message ? <Text style={s.dialogMsg}>{message}</Text> : null}
-          {children}
+          {/* Si el contenido es largo se desplaza; los botones quedan siempre a la vista. */}
+          <ScrollView style={{ flexGrow: 0, flexShrink: 1 }} contentContainerStyle={{ gap: 10 }} keyboardShouldPersistTaps="handled">
+            {message ? <Text style={s.dialogMsg}>{message}</Text> : null}
+            {children}
+          </ScrollView>
           <View style={s.dialogRow}>
             <Btn title={cancelText} variant="secondary" onPress={onCancel} style={{ flex: 1 }} />
             <Btn title={confirmText} onPress={onConfirm} style={{ flex: 1 }} />
@@ -405,6 +409,7 @@ export const s = StyleSheet.create({
     gap: 10,
     width: '100%',
     maxWidth: 420,
+    maxHeight: '100%',
     alignSelf: 'center',
   },
   dialogTitle: { fontSize: 19, fontWeight: '700', color: C.ink, letterSpacing: -0.3 },

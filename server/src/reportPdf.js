@@ -54,6 +54,7 @@ export function writeDayReportPdf(range, stream) {
     ['No', String(rep.counts.no), INK],
     ['Pendientes', String(rep.counts.pendientes), rep.counts.pendientes ? RED : INK],
     ['Falta surtir', String(rep.counts.por_surtir), INK],
+    ['Por confirmar', String(rep.counts.por_confirmar ?? 0), INK],
     ['Novedades', String(rep.counts.novedades), rep.counts.novedades ? RED : INK],
     ['Consumo', money(rep.counts.total), INK],
   ];

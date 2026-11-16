@@ -144,7 +144,7 @@ export default function RoomDetail({
 
         {r.status === 'revisada' && (
           <Fold
-            title="Falta por reponer"
+            title={r.needs_confirm ? "Por confirmar · sin consumo" : "Falta por reponer"}
             right={money(r.total)}
             open={!!open.pending || editing}
             onPress={() => toggle('pending')}

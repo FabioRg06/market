@@ -16,15 +16,16 @@ const GAP = 10;
 const STATUSES: RoomStatus[] = ['por_revisar', 'revisada', 'surtida'];
 
 /** Filtros: los estados y las marcas de cada habitación. */
-type Filter = RoomStatus | 'novedad' | 'por_salir' | 'doble_ciclo';
+type Filter = RoomStatus | 'por_confirmar' | 'novedad' | 'por_salir' | 'doble_ciclo';
 const FILTERS: { key: Filter; label: string; color: string; ring: string }[] = [
   ...STATUSES.map((st) => ({ key: st as Filter, label: STATUS_LABEL[st], color: C.status[st].tint, ring: C.status[st].solid })),
+  { key: 'por_confirmar', label: 'Por confirmar (sin consumo)', color: C.status.revisada.tint, ring: C.status.revisada.ink },
   { key: 'novedad', label: 'Con novedad', color: '#FDECEC', ring: C.danger },
   { key: 'por_salir', label: 'Pendiente por salir', color: '#FFF4E5', ring: '#C77D12' },
   { key: 'doble_ciclo', label: 'Doble ciclo', color: '#EEF2FE', ring: C.brand },
 ];
 const matches = (r: RoomRow, f: Filter) =>
-  f === 'novedad' ? r.has_novedad : f === 'por_salir' ? r.pending_checkout : f === 'doble_ciclo' ? r.double_cycle : r.status === f;
+  f === 'por_confirmar' ? r.needs_confirm : f === 'novedad' ? r.has_novedad : f === 'por_salir' ? r.pending_checkout : f === 'doble_ciclo' ? r.double_cycle : r.status === f;
 const isStatus = (f: Filter) => (STATUSES as Filter[]).includes(f);
 /** Varios filtros: basta uno de los estados elegidos, y se deben cumplir todas las marcas. */
 function matchesAll(r: RoomRow, active: Filter[]) {
@@ -296,6 +297,7 @@ export const RoomCard = memo(function RoomCard({
       <View style={g.topRow}>
         <TypeBadge type={room.type} />
         <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+          {room.needs_confirm && <Flag text="Confirmar" color={C.status.revisada.ink} />}
           {room.pending_checkout && <Flag text="Por salir" color="#C77D12" />}
           {room.double_cycle && <Flag text="2 ciclos" color={C.brand} />}
           {pending && <CloudPending size={15} color={C.muted} />}

@@ -4,7 +4,7 @@
 //  · Revisada → muestra lo que falta y deja confirmar sin consumo, agregar consumo
 //    (el huésped sigue), reportar una novedad (el huésped ya se fue) o marcar surtida.
 import React, { useCallback, useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as local from '../../local/db';
 import { requestSync, useSyncState } from '../../local/sync';
 import { getSettings } from '../../settings';
@@ -71,7 +71,9 @@ export default function RoomList({
     setActions(null);
     const st = await who();
     if (!st) return;
+    // Confirmada sin consumo: no hay nada que surtir, vuelve a surtida.
     local.confirmNoConsumption(room.id, st.inspectorName.trim(), st.deviceId);
+    local.restockRoom(room.id, st.inspectorName.trim());
     requestSync();
     load();
   }
@@ -138,13 +140,19 @@ export default function RoomList({
                 <Text style={st.sheetTitle}>Habitación {actions.number}</Text>
                 <TypeBadge type={actions.type} size="md" />
               </View>
-              <Receipt
-                title={actions.units ? 'Lo que falta reponer' : 'Revisada sin consumo'}
-                subtitle={`${actions.reviewed_by ?? ''} · ${time(actions.reviewed_at)}`}
-                lines={actions.missing}
-              />
+              {/* Con muchos consumos la lista se desplaza y los botones quedan siempre a la vista. */}
+              <ScrollView style={st.receiptScroll} contentContainerStyle={{ flexGrow: 0 }}>
+                <Receipt
+                  title={actions.needs_confirm ? 'Por confirmar · sin consumo' : actions.units ? 'Lo que falta reponer' : 'Revisada sin consumo'}
+                  subtitle={`${actions.reviewed_by ?? ''} · ${time(actions.reviewed_at)}`}
+                  lines={actions.missing}
+                />
+              </ScrollView>
               {actions.needs_confirm && (
-                <Btn title="Confirmar: no consumió nada" onPress={() => confirmEmpty(actions)} />
+                <>
+                  <Text style={st.hint}>Se revisó sin consumo. Vuelve a mirar el minibar y confirma, o reporta la novedad si encontraste algo.</Text>
+                  <Btn title="Confirmar: no consumió nada" onPress={() => confirmEmpty(actions)} />
+                </>
               )}
               <View style={[s.row, { gap: 8 }]}>
                 <Btn title="Agregar consumo" variant="secondary" onPress={() => start(actions, 'consumo')} style={{ flex: 1 }} />
@@ -152,7 +160,7 @@ export default function RoomList({
               </View>
               <Text style={st.hint}>Consumo: el huésped sigue en la habitación. Novedad: post, no reconocido o no se acercó a pagar.</Text>
               <Btn title="Cambio de producto (vencido o dañado)" variant="secondary" onPress={() => start(actions, 'cambio')} />
-              <Btn title="Marcar surtida" variant={actions.needs_confirm ? 'secondary' : 'primary'} onPress={() => restock(actions)} />
+              {!actions.needs_confirm && <Btn title="Marcar surtida" onPress={() => restock(actions)} />}
               <Btn title="Cerrar" variant="quiet" onPress={() => setActions(null)} />
             </Pressable>
           )}
@@ -193,7 +201,8 @@ const st = StyleSheet.create({
     elevation: 6,
   },
   overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.4)', justifyContent: 'center', padding: 20 },
-  sheet: { backgroundColor: C.bg, borderRadius: 16, padding: 18, gap: 10, width: '100%', maxWidth: 440, alignSelf: 'center' },
+  sheet: { backgroundColor: C.bg, borderRadius: 16, padding: 18, gap: 10, width: '100%', maxWidth: 440, maxHeight: '100%', alignSelf: 'center' },
+  receiptScroll: { flexGrow: 0, flexShrink: 1, minHeight: 120 },
   sheetTitle: { fontSize: 20, fontWeight: '700', color: C.ink },
   hint: { fontSize: 12, color: C.muted, textAlign: 'center' },
 });

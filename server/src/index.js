@@ -167,6 +167,10 @@ app.put('/api/type-inventory/:type', (req, res) => {
 // ---- Bloques ----
 app.get('/api/blocks', (_req, res) => res.json(reception.blocks()));
 
+// Bloque de los números sin letra en el Excel de salidas.
+app.get('/api/excel-block', (_req, res) => res.json({ block_id: reception.excelBlock() }));
+app.put('/api/excel-block', (req, res) => res.json({ ok: reception.setExcelBlock(req.body?.block_id || null) }));
+
 app.post('/api/blocks', (req, res) => {
   const code = String(req.body?.code ?? '').trim();
   if (!code) return res.status(400).json({ error: 'Falta el código' });

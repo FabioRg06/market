@@ -6,7 +6,7 @@ import { api, session } from '../../api';
 import type { RoomRow, RoomStatus } from '../../types';
 import { dayRange, money, STATUS_LABEL, time } from '../../format';
 import RoomGrid from '../../RoomGrid';
-import { BoxGlyph, ChartGlyph, PeopleGlyph, DocGlyph, DoorGlyph, GearGlyph, GridGlyph, InvoiceGlyph, LayersGlyph, LogoutGlyph, UploadGlyph, WarehouseGlyph } from '../../icons';
+import { BoxGlyph, ChartGlyph, PeopleGlyph, DocGlyph, DoorGlyph, GearGlyph, GridGlyph, InvoiceGlyph, LayersGlyph, LogoutGlyph, UploadGlyph } from '../../icons';
 import { C, Confirm, Drawer, Screen, tabular } from '../../ui';
 import { canPickFiles, fileToBase64, pickFile } from '../../webfile';
 import RoomDetail from './RoomDetail';
@@ -15,9 +15,9 @@ import InventoryPanel from './InventoryPanel';
 import BlocksPanel from './BlocksPanel';
 import AnalyticsPanel from './AnalyticsPanel';
 import WorkersPanel from './WorkersPanel';
-import { BodegaPanel, FacturacionPanel } from './ComingSoon';
+import { FacturacionPanel } from './ComingSoon';
 
-type Section = 'habitaciones' | 'trabajadores' | 'analitica' | 'reporte' | 'inventario' | 'bodega' | 'facturacion' | 'bloques';
+type Section = 'habitaciones' | 'trabajadores' | 'analitica' | 'reporte' | 'inventario' | 'facturacion' | 'bloques';
 
 const NAV: { key: Section; label: string; Icon: (p: { size?: number; color?: string }) => React.ReactElement }[] = [
   { key: 'habitaciones', label: 'Habitaciones', Icon: GridGlyph },
@@ -25,7 +25,6 @@ const NAV: { key: Section; label: string; Icon: (p: { size?: number; color?: str
   { key: 'analitica', label: 'Analítica', Icon: ChartGlyph },
   { key: 'reporte', label: 'Reporte del día', Icon: DocGlyph },
   { key: 'inventario', label: 'Inventario', Icon: BoxGlyph },
-  { key: 'bodega', label: 'Bodega', Icon: WarehouseGlyph },
   { key: 'facturacion', label: 'Facturación', Icon: InvoiceGlyph },
   { key: 'bloques', label: 'Bloques', Icon: LayersGlyph },
 ];
@@ -189,7 +188,6 @@ export default function ReceptionHome({ onSettings }: { onSettings: () => void }
         {section === 'reporte' && <ReportPanel onOpenRoom={setSelected} />}
         {section === 'inventario' && <InventoryPanel />}
         {section === 'bloques' && <BlocksPanel onChanged={load} />}
-        {section === 'bodega' && <BodegaPanel />}
         {section === 'facturacion' && <FacturacionPanel />}
       </View>
 

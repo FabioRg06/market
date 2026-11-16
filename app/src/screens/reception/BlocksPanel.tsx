@@ -34,12 +34,14 @@ export default function BlocksPanel({ onChanged }: { onChanged: () => void }) {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [adding, setAdding] = useState<Draft | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [bare, setBare] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const b = await api.get<BlockRow[]>('/api/blocks');
       setBlocks(b);
       setDrafts(Object.fromEntries(b.map((x) => [x.id, toDraft(x)])));
+      setBare((await api.get<{ block_id: string | null }>('/api/excel-block')).block_id);
     } catch (e: any) {
       setMsg(`No se pudo cargar: ${e.message}`);
     }
@@ -74,6 +76,29 @@ export default function BlocksPanel({ onChanged }: { onChanged: () => void }) {
             <Text style={st.ctaText}>Nuevo bloque</Text>
           </Pressable>
         )}
+      </View>
+      <View style={st.bare}>
+        <Text style={st.bareTitle}>Excel de salidas: números sin letra</Text>
+        <Text style={s.muted}>
+          Si el Excel trae solo el número (por ejemplo 101 en vez de C101), la habitación es de este bloque. Si el número solo existe en un
+          bloque, se usa ese.
+        </Text>
+        <View style={[s.row, { flexWrap: 'wrap', gap: 6, marginTop: 6 }]}>
+          {blocks.filter((b) => b.ranges.length).map((b) => {
+            const on = bare === b.id;
+            return (
+              <Pressable
+                key={b.id}
+                onPress={() => run(() => api.put('/api/excel-block', { block_id: b.id }), `Los números sin letra ahora son del bloque ${b.code}.`)}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: on }}
+                style={[st.chip, on && st.chipOn]}
+              >
+                <Text style={[st.chipText, on && { color: '#fff' }]}>{b.code}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
       {msg && (
         <Pressable onPress={() => setMsg(null)} style={st.msg}>
@@ -205,6 +230,11 @@ function BlockCard({
 }
 
 const st = StyleSheet.create({
+  bare: { backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.line, padding: 14, gap: 4 },
+  bareTitle: { fontSize: 15, fontWeight: '700', color: C.ink },
+  chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: C.line, backgroundColor: C.surface },
+  chipOn: { backgroundColor: C.brand, borderColor: C.brand },
+  chipText: { fontSize: 13, fontWeight: '700', color: C.ink },
   page: { padding: 28, gap: 14, maxWidth: 980, width: '100%', alignSelf: 'center' },
   lead: { fontSize: 15, color: C.muted, fontWeight: '600' },
   msg: { backgroundColor: C.surface, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: C.line },

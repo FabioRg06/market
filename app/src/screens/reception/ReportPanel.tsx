@@ -12,7 +12,7 @@ import { openUrl } from '../../webfile';
 const DAY = 24 * 60 * 60 * 1000;
 
 interface Report {
-  counts: { si: number; no: number; pendientes: number; nap: number; no_reconocido: number; cambios: number; revisadas: number; por_revisar: number; por_surtir: number; surtidas: number; novedades: number; total: number };
+  counts: { si: number; no: number; pendientes: number; nap: number; no_reconocido: number; cambios: number; revisadas: number; por_revisar: number; por_surtir: number; por_confirmar?: number; surtidas: number; novedades: number; total: number };
   reviewed: (InspectionWithItems & { room_type: RoomType })[];
   restocked: { room_id: string; room_number: string; block_code: string; restocked_at: number; restocked_by: string }[];
   pendingReview: { room_id: string; room_number: string; block_code: string; guest_name: string | null; flight_time: string | null }[];
@@ -76,6 +76,7 @@ export default function ReportPanel({ onOpenRoom }: { onOpenRoom: (roomId: strin
             <Count label="No" value={rep.counts.no} color={C.status.surtida.solid} />
             <Count label="Pendientes" value={rep.counts.pendientes} color={C.status.por_revisar.solid} />
             <Count label="Falta surtir" value={rep.counts.por_surtir} color={C.status.revisada.ink} />
+            <Count label="Por confirmar" value={rep.counts.por_confirmar ?? 0} color={C.status.revisada.ink} />
             <Count label="Surtidas" value={rep.counts.surtidas} color={C.brand} />
             <Count label="Novedades" value={rep.counts.novedades} color={C.danger} />
             <Count label="Cambios" value={rep.counts.cambios} color={C.brand} />

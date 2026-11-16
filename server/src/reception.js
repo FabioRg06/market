@@ -16,6 +16,32 @@ import { catalog, productImages, regenerateRooms } from './seed.js';
 const normalizeRoomNumber = (raw) =>
   raw.toUpperCase().replace(/HAB(ITACI[OÓ]N)?\.?/g, '').replace(/[\s\-_.#]/g, '');
 
+const plain = (t) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+/**
+ * Nombre del bloque como lo escriben en el Excel → su letra. Acepta variantes y errores comunes:
+ *   "Bungalow", "Bungalo", "Bungaloo"           → BW
+ *   "Bungalow kids", "Bungalo kids", "Kids"     → K
+ *   "Bungalow kids L", "Bungalo kids -L"        → L
+ *   "Ranchería", "Rancheria"                     → R
+ */
+export function blockPrefix(text) {
+  const t = plain(String(text));
+  if (/kid/.test(t)) return /kids?[\s\-_.]*l(?![a-z])/.test(t) ? 'L' : 'K';
+  if (/b[uo]ng/.test(t)) return 'BW';
+  if (/ranch/.test(t)) return 'R';
+  return '';
+}
+
+/** Habitación como venga escrita ("Bungalow 243", "Bungalo kids -L 101", "bw-243", "C101", "101"). */
+export function parseRoomText(raw) {
+  const text = String(raw);
+  const prefix = blockPrefix(text);
+  const digits = text.match(/\d+/g);
+  if (prefix && digits) return prefix + digits[digits.length - 1];
+  return normalizeRoomNumber(text);
+}
+
 const TYPES = new Set(catalog.types.map((t) => t.code));
 
 function itemsFor(inspectionIds) {
@@ -93,10 +119,14 @@ function summarize(room, st) {
     }
   const missingList = [...missing.values()];
   const units = missingList.reduce((s, m) => s + m.quantity, 0);
+  // Revisada sin consumo: queda "por confirmar" hasta que alguien confirme que no consumió
+  // nada (o reporte una novedad). Al confirmar vuelve a surtida, sin pasar por surtir.
+  const lastPending = pending[pending.length - 1];
+  const needsConfirm = units === 0 && !!lastPending && lastPending.kind !== 'confirmacion' && restocks(lastPending);
   let status = 'surtida';
   if (room.type !== 'SM') {
     if (room.review_at && (!st?.lastFinishedAt || st.lastFinishedAt < room.review_at)) status = 'por_revisar';
-    else if (units > 0) status = 'revisada';
+    else if (units > 0 || needsConfirm) status = 'revisada';
   }
   const last = pending[pending.length - 1] ?? null;
   return {
@@ -108,7 +138,7 @@ function summarize(room, st) {
     reviewed_at: last?.finished_at ?? null,
     reviewed_by: last?.inspector ?? null,
     restocked_at: st?.lastRestockAt ?? null,
-    needs_confirm: false,
+    needs_confirm: status === 'revisada' && needsConfirm,
     has_novedad: status === 'revisada' && pending.some((i) => i.kind === 'novedad'),
     charges: status === 'revisada' ? [...new Set(pending.map((i) => i.charge).filter(Boolean))] : [],
     double_cycle: !!room.double_cycle,
@@ -312,6 +342,18 @@ function flightText(v) {
  * "Bloque"; sin ella la fila se devuelve en `ambiguous` y no se marca nada. Las habitaciones
  * sin minibar no se marcan (`noMinibar`).
  */
+/** Bloque al que van los números sin letra del Excel ("101" → C101). Se cambia en Bloques. */
+export function excelBlock() {
+  const id = db.prepare(`SELECT value FROM meta WHERE key = 'excel_bloque'`).get()?.value ?? 'c';
+  return db.prepare(`SELECT id FROM blocks WHERE id = ?`).get(id) ? id : null;
+}
+
+export function setExcelBlock(id) {
+  if (id && !db.prepare(`SELECT id FROM blocks WHERE id = ?`).get(id)) return false;
+  db.prepare(`INSERT INTO meta (key, value) VALUES ('excel_bloque', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(id ?? '');
+  return true;
+}
+
 export function importSheet(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer' });
   const sheet = wb.Sheets[wb.SheetNames[0]];
@@ -327,7 +369,21 @@ export function importSheet(buffer) {
   const cWorker = col(/trabaj|camarer|encargad|revisa|asignad|responsable/);
   const cDouble = col(/doble|ciclo/);
   const cPending = col(/pendiente|por salir/);
-  const cBlock = col(/bloque|torre|edificio|sector/);
+  let cBlock = col(/bloque|torre|edificio|sector|zona|ubicaci|area|categor/);
+  if (cBlock < 0) {
+    // El bloque viene en otra columna con cualquier encabezado (o sin él): se busca la columna
+    // donde la mayoría dice "Bungalow", "Bungalow kids", "Kids L", "Ranchería" o un código de bloque.
+    const codes = new Set(db.prepare(`SELECT code FROM blocks`).all().map((b) => b.code.toUpperCase()));
+    const isBlock = (v) => !!blockPrefix(v) || codes.has(String(v).trim().toUpperCase().replace(/^BLOQUE\s*/, ''));
+    const data = rows.slice(headerIdx + 1).filter((r) => r[cRoom] != null && r[cRoom] !== '');
+    let best = 0;
+    for (let c = 0; c < Math.max(header.length, ...data.map((r) => r.length)); c++) {
+      if (c === cRoom || c === cType || c === cGuest) continue;
+      const vals = data.map((r) => r[c]).filter((v) => v != null && String(v).trim() !== '');
+      const hits = vals.filter(isBlock).length;
+      if (hits > best && hits >= vals.length / 2) [best, cBlock] = [hits, c];
+    }
+  }
   const yes = (v) => /^(x|si|s|1|true|y|yes)$/.test(norm(v));
   const workerByName = new Map(workers().map((w) => [norm(w.name), w.id]));
   const unknownWorkers = new Set();
@@ -335,7 +391,8 @@ export function importSheet(buffer) {
   // Habitaciones por su número completo y por el número sin letras.
   const byFull = new Map();
   const byDigits = new Map();
-  for (const room of db.prepare(`SELECT r.id, r.number, r.type, b.code FROM rooms r JOIN blocks b ON b.id = r.block_id WHERE r.active = 1`).all()) {
+  const bareBlock = excelBlock();
+  for (const room of db.prepare(`SELECT r.id, r.number, r.type, r.block_id, b.code FROM rooms r JOIN blocks b ON b.id = r.block_id WHERE r.active = 1`).all()) {
     byFull.set(room.number, room);
     const digits = room.number.replace(/\D/g, '');
     if (!byDigits.has(digits)) byDigits.set(digits, []);
@@ -349,12 +406,15 @@ export function importSheet(buffer) {
     for (const r of rows.slice(headerIdx + 1)) {
       const raw = r[cRoom];
       if (raw == null || raw === '') continue;
-      const typed = normalizeRoomNumber(String(raw));
-      const block = cBlock >= 0 && r[cBlock] != null ? normalizeRoomNumber(String(r[cBlock])).replace(/^BLOQUE/, '') : '';
+      const typed = parseRoomText(raw);
+      const blockCell = cBlock >= 0 && r[cBlock] != null ? String(r[cBlock]) : '';
+      const block = blockCell ? blockPrefix(blockCell) || normalizeRoomNumber(blockCell).replace(/^BLOQUE/, '') : '';
       let room = byFull.get(typed) ?? (block ? byFull.get(block + typed) : undefined);
       if (!room && /^\d+$/.test(typed)) {
         let same = byDigits.get(typed) ?? [];
         if (block) same = same.filter((x) => x.code.toUpperCase() === block);
+        // Sin letra y sin columna Bloque: es del bloque elegido en Bloques (por defecto C).
+        else if (same.length > 1 && bareBlock && same.some((x) => x.block_id === bareBlock)) same = same.filter((x) => x.block_id === bareBlock);
         if (same.length > 1) {
           ambiguous.push(`${typed} (${same.map((x) => x.code).join(', ')})`);
           continue;
@@ -416,10 +476,11 @@ export function dayReport({ from, to }) {
   const changes = reviewed.filter((i) => i.kind === 'cambio');
   reviewed = reviewed.filter((i) => i.kind !== 'cambio');
   const pendingReview = rooms.filter((r) => r.status === 'por_revisar');
-  const pendingRestock = rooms.filter((r) => r.status === 'revisada');
+  const pendingRestock = rooms.filter((r) => r.status === 'revisada' && !r.needs_confirm);
+  const pendingConfirm = rooms.filter((r) => r.status === 'revisada' && r.needs_confirm);
   // Sí = revisadas con consumo · No = revisadas sin consumo · Pendientes = faltó revisarlas.
   const unitsByRoom = new Map();
-  for (const i of reviewed) unitsByRoom.set(i.room_id, (unitsByRoom.get(i.room_id) ?? 0) + i.units);
+  for (const i of reviewed) if (i.kind !== 'confirmacion') unitsByRoom.set(i.room_id, (unitsByRoom.get(i.room_id) ?? 0) + i.units);
   const withConsumption = [...unitsByRoom.values()].filter((u) => u > 0).length;
   return {
     changes,
@@ -430,6 +491,7 @@ export function dayReport({ from, to }) {
       revisadas: new Set(reviewed.map((i) => i.room_id)).size,
       por_revisar: pendingReview.length,
       por_surtir: pendingRestock.length,
+      por_confirmar: pendingConfirm.length,
       surtidas: restocked.length,
       novedades: reviewed.filter((i) => i.kind === 'novedad').length,
       nap: reviewed.filter((i) => i.charge === 'nap').length,

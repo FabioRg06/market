@@ -1,17 +1,8 @@
-// Módulos en construcción (Bodega y Facturación): qué van a hacer cuando estén listos.
+// Módulo en construcción (Facturación): qué van a hacer cuando estén listos.
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { C } from '../../ui';
-import { InvoiceGlyph, WarehouseGlyph } from '../../icons';
-
-const BODEGA = [
-  { title: 'Existencias', text: 'Cuánto hay de cada producto en la bodega, siempre al día.' },
-  { title: 'Entradas', text: 'Registrar lo que llega del proveedor.' },
-  { title: 'Salidas al surtir', text: 'Cada habitación surtida descuenta de la bodega sola.' },
-  { title: 'Vencidos y dañados', text: 'Los cambios de producto se descuentan con su motivo.' },
-  { title: 'Alertas', text: 'Aviso cuando un producto está por acabarse.' },
-  { title: 'Con Siigo', text: 'Los movimientos cuadran con el inventario de Siigo.' },
-];
+import { InvoiceGlyph } from '../../icons';
 
 const FACTURACION = [
   { title: 'Factura sola', text: 'Cada revisión con consumo genera su factura en Siigo, sin ningún botón.' },
@@ -21,10 +12,6 @@ const FACTURACION = [
   { title: 'Novedades', text: 'Lo no reconocido se reversa con nota crédito.' },
   { title: 'Reportes', text: 'Totales facturados por día y por producto.' },
 ];
-
-export function BodegaPanel() {
-  return <ComingSoon Icon={WarehouseGlyph} title="Bodega" text="Estamos construyendo el control de la bodega del minibar. Esto es lo que va a traer:" items={BODEGA} />;
-}
 
 export function FacturacionPanel() {
   return (
